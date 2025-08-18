@@ -14,7 +14,7 @@ import re
 import glob
 import uuid
 from werkzeug.utils import secure_filename
-from PyPDF2 import PdfReader
+
 
 # 環境変数を読み込み
 load_dotenv()
@@ -29,8 +29,8 @@ app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'  # 本番環境では安全なキーに変更
 
 # ファイルアップロード設定
-UPLOAD_FOLDER = 'lesson_plans'
-ALLOWED_EXTENSIONS = {'pdf'}
+UPLOAD_FOLDER = 'uploads'  # 一時的なアップロード用
+ALLOWED_EXTENSIONS = {'md', 'txt'}  # Markdownとテキストファイルのみ
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB制限
 
@@ -171,22 +171,117 @@ def extract_message_from_json_response(response):
         print(f"JSON解析エラー: {e}, 元のレスポンスを返します")
         return response
 
-def extract_text_from_pdf(pdf_path):
-    """PDFファイルからテキストを抽出する"""
+def load_markdown_content(file_path):
+    """Markdownファイルからテキストを読み込む"""
     try:
-        with open(pdf_path, 'rb') as file:
-            pdf_reader = PdfReader(file)
-            text = ""
-            for page in pdf_reader.pages:
-                text += page.extract_text() + "\n"
-        return text.strip()
+        with open(file_path, 'r', encoding='utf-8') as file:
+            content = file.read()
+        return content.strip()
     except Exception as e:
-        print(f"PDF読み込みエラー: {e}")
+        print(f"Markdown読み込みエラー: {e}")
         return None
 
-def save_lesson_plan_info(unit, filename, content):
+def get_learning_guidelines():
+    """学習指導要領の内容を取得"""
+    guidelines_path = "guidelines/learning_guidelines.md"
+    if os.path.exists(guidelines_path):
+        return load_markdown_content(guidelines_path)
+    return None
+
+def get_teaching_support():
+    """指導支援方針の内容を取得"""
+    support_path = "guidelines/teaching_support.md"
+    if os.path.exists(support_path):
+        return load_markdown_content(support_path)
+    return None
+
+def get_learning_support_system():
+    """学習段階別支援システムの内容を取得"""
+    support_path = "guidelines/learning_support_system.md"
+    if os.path.exists(support_path):
+        return load_markdown_content(support_path)
+    return None
+
+def analyze_unit_characteristics(unit):
+    """単元の特性を分析して見方・考え方を抽出"""
+    unit_characteristics = {
+        "水のあたたまり方": {
+            "見方・考え方": "温度と物質の状態・性質の関係性に注目する",
+            "重点活動": ["温度変化の比較", "対流現象の言語化", "日常経験との関連"],
+            "生活経験": ["お風呂の循環", "やかんのお湯", "暖房の仕組み"],
+            "キーワード": ["対流", "循環", "あたたまり方", "温度差"],
+            "産婆法質問": [
+                "お風呂に入るとき、どの部分があたたかく感じますか？",
+                "やかんでお湯を沸かすとき、どんなことが起こりますか？",
+                "水の中で何が動いているのでしょうか？"
+            ]
+        },
+        "空気のあたたまり方": {
+            "見方・考え方": "目に見えない物質の性質を構造や状態変化と関係づけて考える",
+            "重点活動": ["見えない現象の言語化", "空気の動きの表現", "比喩的表現"],
+            "生活経験": ["ドライヤー", "エアコン", "風船の変化"],
+            "キーワード": ["対流", "空気の流れ", "軽い・重い", "上昇・下降"],
+            "産婆法質問": [
+                "ドライヤーの温かい風はどちらに向かって流れますか？",
+                "エアコンはなぜ上の方に取り付けてあるのでしょう？",
+                "風船を太陽に当てるとどうなりますか？"
+            ]
+        },
+        "金属のあたたまり方": {
+            "見方・考え方": "温度と物質の状態・性質の関係性に注目する",
+            "重点活動": ["伝導現象の観察", "順序立てた説明", "物質比較"],
+            "生活経験": ["フライパンで料理", "金属スプーン", "アイロン"],
+            "キーワード": ["伝導", "順番に", "伝わる", "熱くなる"],
+            "産婆法質問": [
+                "フライパンで料理をするとき、どの部分から熱くなりますか？",
+                "金属のスプーンをお湯に入れると、どうなりますか？",
+                "なぜ金属は料理道具によく使われるのでしょう？"
+            ]
+        }
+    }
+    return unit_characteristics.get(unit, {})
+
+def determine_learning_stage(conversation_count, conversation_content=None):
+    """対話内容から学習段階を判定"""
+    if conversation_count <= 2:
+        return "自己思考段階"
+    elif conversation_count <= 4:
+        return "伝え合い段階"
+    else:
+        return "思考まとめ段階"
+
+def generate_stage_appropriate_guidance(stage, unit):
+    """学習段階に応じた指導ガイダンスを生成"""
+    unit_info = analyze_unit_characteristics(unit)
+    
+    guidance = {
+        "自己思考段階": {
+            "目標": "児童が自分の考えを持ち、予想・仮説を立てる",
+            "支援方針": ["日常経験を引き出す", "既習事項との関連付け", "根拠を持った予想を促す"],
+            "質問例": unit_info.get("産婆法質問", ["どう思いますか？"])[:1],
+            "重点": f"生活経験（{', '.join(unit_info.get('生活経験', [])[:2])}）との関連を重視"
+        },
+        "伝え合い段階": {
+            "目標": "他者との比較・共有・討論を通じて考えを深める", 
+            "支援方針": ["多様な考えを価値付ける", "比較検討を促す", "根拠を明確化"],
+            "質問例": ["友達の考えと比べてどうですか？", "なぜ違いが生まれたのでしょう？"],
+            "重点": f"見方・考え方「{unit_info.get('見方・考え方', '')}」の深化"
+        },
+        "思考まとめ段階": {
+            "目標": "結果の整理、概念の抽出、考察の記述",
+            "支援方針": ["学習内容の整理", "概念の一般化", "新たな疑問の発見"],
+            "質問例": ["今日分かったことは何ですか？", "他でも同じことが起こりそうですか？"],
+            "重点": f"キーワード（{', '.join(unit_info.get('キーワード', [])[:3])}）の理解確認"
+        }
+    }
+    return guidance.get(stage, guidance["自己思考段階"])
+
+def save_lesson_plan_info(unit, content):
     """指導案情報をJSONファイルに保存"""
-    lesson_plans_file = "lesson_plans/lesson_plans_index.json"
+    lesson_plans_file = "lesson_plans_md/lesson_plans_index.json"
+    
+    # ディレクトリが存在しない場合は作成
+    os.makedirs("lesson_plans_md", exist_ok=True)
     
     # 既存の指導案情報を読み込み
     lesson_plans = {}
@@ -199,8 +294,8 @@ def save_lesson_plan_info(unit, filename, content):
     
     # 新しい指導案情報を追加
     lesson_plans[unit] = {
-        'filename': filename,
-        'upload_date': datetime.now().isoformat(),
+        'filename': f'{unit}.md',
+        'last_updated': datetime.now().isoformat(),
         'content_preview': content[:500] if content else "",  # 最初の500文字のプレビュー
         'content_length': len(content) if content else 0
     }
@@ -211,8 +306,13 @@ def save_lesson_plan_info(unit, filename, content):
 
 def load_lesson_plan_content(unit):
     """指定された単元の指導案内容を読み込む"""
-    lesson_plans_file = "lesson_plans/lesson_plans_index.json"
+    # まず既存のMarkdownファイルを確認
+    markdown_path = f"lesson_plans_md/{unit}.md"
+    if os.path.exists(markdown_path):
+        return load_markdown_content(markdown_path)
     
+    # インデックスファイルからも確認
+    lesson_plans_file = "lesson_plans_md/lesson_plans_index.json"
     if not os.path.exists(lesson_plans_file):
         return None
     
@@ -223,10 +323,10 @@ def load_lesson_plan_content(unit):
         if unit not in lesson_plans:
             return None
         
-        # PDFファイルからテキストを再読み込み
-        pdf_path = os.path.join(UPLOAD_FOLDER, lesson_plans[unit]['filename'])
-        if os.path.exists(pdf_path):
-            return extract_text_from_pdf(pdf_path)
+        # Markdownファイルから内容を読み込み
+        markdown_path = os.path.join("lesson_plans_md", lesson_plans[unit]['filename'])
+        if os.path.exists(markdown_path):
+            return load_markdown_content(markdown_path)
         else:
             return None
             
@@ -248,13 +348,176 @@ def get_lesson_plans_list():
         return {}
 
 # APIコール用のリトライ関数
-def call_openai_with_retry(prompt, max_retries=3, delay=2):
-    """OpenAI APIを呼び出し、エラー時はリトライする"""
+def build_enhanced_prompt(base_prompt, unit=None, stage=None):
+    """学習指導要領とMarkdownガイドラインを活用して強化されたプロンプトを構築"""
+    enhanced_prompt = base_prompt
+    
+    # 学習指導要領の内容を追加（言語活動重視）
+    guidelines = get_learning_guidelines()
+    if guidelines:
+        # 特に言語活動部分を抽出
+        relevant_section = ""
+        if "言語活動" in guidelines:
+            lines = guidelines.split('\n')
+            for i, line in enumerate(lines):
+                if "言語活動" in line or "見方・考え方" in line:
+                    relevant_section += '\n'.join(lines[max(0, i-2):min(len(lines), i+8)])
+                    break
+        enhanced_prompt += f"\n\n【学習指導要領（言語活動重視）】:\n{relevant_section[:1000]}..."
+    
+    # 指導支援方針を追加
+    teaching_support = get_teaching_support()
+    if teaching_support:
+        # 産婆法の部分を重点的に抽出
+        if "産婆法" in teaching_support:
+            lines = teaching_support.split('\n')
+            for i, line in enumerate(lines):
+                if "産婆法" in line:
+                    support_section = '\n'.join(lines[i:min(len(lines), i+20)])
+                    enhanced_prompt += f"\n\n【産婆法実践方針】:\n{support_section[:800]}..."
+                    break
+    
+    # 単元別指導案があれば追加
+    if unit:
+        lesson_content = load_lesson_plan_content(unit)
+        if lesson_content:
+            # 産婆法実践のポイント部分を抽出
+            if "産婆法実践のポイント" in lesson_content:
+                lines = lesson_content.split('\n')
+                for i, line in enumerate(lines):
+                    if "産婆法実践のポイント" in line:
+                        lesson_section = '\n'.join(lines[i:min(len(lines), i+15)])
+                        enhanced_prompt += f"\n\n【{unit}指導案（産婆法）】:\n{lesson_section[:600]}..."
+                        break
+        
+        # 単元特性の詳細分析を追加
+        unit_info = analyze_unit_characteristics(unit)
+        if unit_info:
+            enhanced_prompt += f"\n\n【{unit}の特性分析】:\n"
+            enhanced_prompt += f"・見方・考え方: {unit_info.get('見方・考え方', '')}\n"
+            enhanced_prompt += f"・重点活動: {', '.join(unit_info.get('重点活動', []))}\n"
+            enhanced_prompt += f"・生活経験例: {', '.join(unit_info.get('生活経験', []))}\n"
+            enhanced_prompt += f"・キーワード: {', '.join(unit_info.get('キーワード', []))}\n"
+    
+    # 学習段階別の支援ガイダンスを追加
+    if stage and unit:
+        conversation_count = 1  # デフォルト値
+        learning_stage = determine_learning_stage(conversation_count)
+        stage_guidance = generate_stage_appropriate_guidance(learning_stage, unit)
+        
+        enhanced_prompt += f"\n\n【現在の学習段階】: {learning_stage}\n"
+        enhanced_prompt += f"・目標: {stage_guidance.get('目標', '')}\n"
+        enhanced_prompt += f"・支援方針: {', '.join(stage_guidance.get('支援方針', []))}\n"
+        enhanced_prompt += f"・重点: {stage_guidance.get('重点', '')}\n"
+        enhanced_prompt += f"・推奨質問: {stage_guidance.get('質問例', [''])[0]}\n"
+    
+    return enhanced_prompt
+
+def analyze_student_response(response, unit):
+    """児童の発言から学習状況を分析して次の支援方針を決定"""
+    analysis = {
+        "理解度": "継続観察",
+        "言語化レベル": "基礎段階", 
+        "日常関連": False,
+        "概念理解": False,
+        "感情・態度": "普通",
+        "推奨支援": "継続質問",
+        "次の質問タイプ": "開放的質問"
+    }
+    
+    response = response.lower() if response else ""
+    
+    # 理解度の判定
+    positive_indicators = ["分かった", "なるほど", "そういうこと", "面白い", "すごい"]
+    negative_indicators = ["分からない", "よく分からない", "難しい", "よく見えない"]
+    
+    if any(word in response for word in positive_indicators):
+        analysis["理解度"] = "良好"
+        analysis["推奨支援"] = "発展質問"
+    elif any(word in response for word in negative_indicators):
+        analysis["理解度"] = "要支援"
+        analysis["推奨支援"] = "基礎確認"
+    
+    # 言語化レベルの判定
+    if len(response) > 30 and any(word in response for word in ["なぜなら", "だから", "理由は"]):
+        analysis["言語化レベル"] = "高度"
+        analysis["次の質問タイプ"] = "深化質問"
+    elif len(response) > 15 and any(word in response for word in ["と思う", "気がする", "みたい"]):
+        analysis["言語化レベル"] = "中程度"
+    
+    # 日常経験との関連確認
+    daily_keywords = ["家で", "普段", "お風呂", "料理", "お母さん", "見たことある", "前に", "いつも"]
+    if any(word in response for word in daily_keywords):
+        analysis["日常関連"] = True
+        analysis["推奨支援"] = "関連深化"
+    
+    # 単元特性に基づく概念理解確認
+    unit_info = analyze_unit_characteristics(unit)
+    keywords = unit_info.get("キーワード", [])
+    if any(keyword.lower() in response for keyword in keywords):
+        analysis["概念理解"] = True
+        analysis["推奨支援"] = "概念確認"
+    
+    # 感情・態度の判定
+    positive_emotions = ["楽しい", "面白い", "すごい", "びっくり", "驚いた"]
+    if any(word in response for word in positive_emotions):
+        analysis["感情・態度"] = "積極的"
+    
+    return analysis
+
+def generate_adaptive_question(analysis, unit, conversation_history=None):
+    """分析結果に基づいて適応的な質問を生成"""
+    unit_info = analyze_unit_characteristics(unit)
+    
+    # 理解度に基づく質問選択
+    if analysis["理解度"] == "良好":
+        if analysis["概念理解"]:
+            questions = [
+                "他の場面でも同じようなことが起こりそうですか？",
+                f"普段の生活で{', '.join(unit_info.get('生活経験', [])[:1])}以外にも似たことはありますか？"
+            ]
+        else:
+            questions = unit_info.get("産婆法質問", ["もう少し詳しく教えてください"])
+    elif analysis["理解度"] == "要支援":
+        questions = [
+            "どの部分が分からないですか？",
+            "今見えたことを教えてください",
+            "どんな感じがしましたか？"
+        ]
+    else:
+        # 通常の段階的質問
+        if analysis["日常関連"]:
+            questions = [
+                "それと今回の実験、似ているところはありますか？",
+                "どんなところが同じだと思いますか？"
+            ]
+        else:
+            questions = unit_info.get("産婆法質問", ["どう思いますか？"])
+    
+    # 会話履歴を考慮して質問の重複を避ける
+    if conversation_history:
+        used_patterns = []
+        for msg in conversation_history:
+            if msg.get('role') == 'assistant':
+                used_patterns.append(msg.get('content', ''))
+        
+        # 使用済みパターンと類似していない質問を選択
+        for question in questions:
+            if not any(pattern in question or question in pattern for pattern in used_patterns):
+                return question
+    
+    return questions[0] if questions else "どう感じましたか？"
+
+def call_openai_with_retry(prompt, max_retries=3, delay=2, unit=None, stage=None):
+    """OpenAI APIを呼び出し、エラー時はリトライする（Markdownガイドライン活用版）"""
     if client is None:
         return "AI システムの初期化に問題があります。管理者に連絡してください。"
     
-    # プロンプトにOpenAI向けの指示を追加
-    enhanced_prompt = f"""{prompt}
+    # Markdownガイドラインを活用してプロンプトを強化
+    enhanced_prompt = build_enhanced_prompt(prompt, unit, stage)
+    
+    # OpenAI向けの応答指示を追加
+    enhanced_prompt += f"""
 
 **重要な応答指示（OpenAI向け）:**
 - 必ず普通の日本語の文章で回答してください
@@ -267,6 +530,7 @@ def call_openai_with_retry(prompt, max_retries=3, delay=2):
 - 「実験お疲れさまでした」「実験の結果は」などの定型句は使わないでください
 - 子どもの前の発言を受け止めてから、新しい質問をしてください
 - 同じフレーズを繰り返さないでください
+- 産婆法（ソクラテス式問答法）を実践し、答えを直接教えるのではなく適切な質問で導いてください
 """
     
     for attempt in range(max_retries):
@@ -521,7 +785,7 @@ def chat():
         full_prompt += f"{role}: {msg['content']}\n"
     
     try:
-        ai_response = call_openai_with_retry(full_prompt)
+        ai_response = call_openai_with_retry(full_prompt, unit=unit, stage='prediction')
         
         # JSON形式のレスポンスの場合は解析して純粋なメッセージを抽出
         ai_message = extract_message_from_json_response(ai_response)
@@ -634,58 +898,48 @@ def reflect_chat():
     # 反省対話履歴に追加
     reflection_conversation.append({'role': 'user', 'content': user_message})
     
-    # 考察支援プロンプト（小学生向け産婆法）
-    conversation_turn = len(reflection_conversation) // 2 + 1
+    # 児童の発言を分析
+    student_analysis = analyze_student_response(user_message, unit)
     
+    # 学習段階判定
+    conversation_turn = len(reflection_conversation) // 2 + 1
+    learning_stage = determine_learning_stage(conversation_turn)
+    stage_guidance = generate_stage_appropriate_guidance(learning_stage, unit)
+    
+    # 適応的質問生成
+    adaptive_question = generate_adaptive_question(student_analysis, unit, reflection_conversation)
+    
+    # 強化された考察支援プロンプト
     system_prompt = f"""
-あなたは小学生の考察を支援する先生です。実験結果について子どもが段階的に考えられるよう導いてください。
+あなたは小学生の考察を支援する理科専門の先生です。学習指導要領と産婆法に基づいて子どもの思考を深く導いてください。
 
-学習単元: {unit}
+【学習情報】
+単元: {unit}
 予想: {prediction_summary}
+対話回数: {conversation_turn}回目
 
-**現在の段階判定:**
-- 1-2回目: 実験結果の確認段階
-- 3-4回目: 予想との比較段階  
-- 5-6回目: 理由の考察段階
-- 7回目以降: 日常生活との関連段階
+【児童分析結果】
+理解度: {student_analysis['理解度']}
+言語化レベル: {student_analysis['言語化レベル']}
+日常関連: {'あり' if student_analysis['日常関連'] else 'なし'}
+概念理解: {'あり' if student_analysis['概念理解'] else 'なし'}
+感情・態度: {student_analysis['感情・態度']}
 
-**今回({conversation_turn}回目)の指導方針:**
-"""
+【現在の学習段階】: {learning_stage}
+目標: {stage_guidance['目標']}
+支援方針: {', '.join(stage_guidance['支援方針'])}
+重点: {stage_guidance['重点']}
 
-    if conversation_turn <= 2:
-        system_prompt += """
-第1段階: 実験結果の言語化
-- 1回目のみ: 「実験でどんなことが起こりましたか？」と聞く
-- 2回目: 子どもが何か答えたら「そうですね」で受け止めて、具体的な部分を深く聞く
-  例: 子どもが「膨らんだ」と言ったら「そうですね。どのくらい膨らみましたか？」
-  例: 子どもが「変化した」と言ったら「なるほど。どんな風に変化しましたか？」
-- 「実験お疲れさま」「実験の結果は」などの同じフレーズは使わない
-- 子どもの具体的な答えに応じて質問を変える
-"""
-    elif conversation_turn <= 4:
-        system_prompt += """
-第2段階: 予想との比較
-- 「あなたの予想と同じでしたか？」
-- 「予想と違った部分はありますか？」
-- 「どんな気持ちですか？」
-- 予想が当たっても外れても、まずその気持ちを大切にする
-"""
-    elif conversation_turn <= 6:
-        system_prompt += """
-第3段階: 理由の考察
-- 「どうしてそうなったと思いますか？」
-- 「何が原因だと思いますか？」
-- 子どもなりの理由や考えを大切にし、考えを深める
-"""
-    else:
-        system_prompt += """
-第4段階: 日常生活との関連
-- 「普段の生活で似たことはありますか？」
-- 「いつ、どこで見たことがありますか？」
-- 身近な経験と結びつけて理解を深める
-"""
+【推奨質問】: {adaptive_question}
 
-    system_prompt += f"""
+**指導原則:**
+- 答えを直接教えずに、適切な質問で児童自身の気づきを促す
+- 児童の日常経験と結び付けて理解を深める
+- 言語化を支援し、思考を可視化する
+- 一度に一つの質問に絞る
+- 児童の発言を受け止めてから次の質問をする
+
+前回の発言を受けて、{student_analysis['推奨支援']}の方針で支援してください。
 
 **応答のルール:**
 1. 子どもの発言をまず受け止める（「そうですね」「なるほど」等）
@@ -721,14 +975,17 @@ def reflect_chat():
 **重要:** 対話履歴を確認して、子どもが既に答えた内容は聞き直さないでください。
 子どもの前の発言に基づいて、次のステップに進む質問をしてください："""
     
-    # 対話履歴を含めてプロンプト作成
-    full_prompt = system_prompt + "\n\n対話履歴:\n"
+    # 強化されたプロンプト構築を使用
+    full_prompt = build_enhanced_prompt(system_prompt, unit=unit, stage='reflection')
+    
+    # 対話履歴を追加
+    full_prompt += "\n\n対話履歴:\n"
     for msg in reflection_conversation:
         role = "学習者" if msg['role'] == 'user' else "AI"
         full_prompt += f"{role}: {msg['content']}\n"
     
     try:
-        ai_response = call_openai_with_retry(full_prompt)
+        ai_response = call_openai_with_retry(full_prompt, unit=unit, stage='reflection')
         
         # JSON形式のレスポンスの場合は解析して純粋なメッセージを抽出
         ai_message = extract_message_from_json_response(ai_response)
@@ -891,21 +1148,18 @@ def upload_lesson_plan():
                 if os.path.exists(old_file):
                     os.remove(old_file)
             
-            # ファイルを保存
-            file.save(file_path)
+            # ファイルを保存（現在はMarkdown形式のため、この部分は使用しない）
+            # file.save(file_path)
             
-            # PDFからテキストを抽出
-            extracted_text = extract_text_from_pdf(file_path)
-            
-            if extracted_text:
-                # 指導案情報を保存
-                save_lesson_plan_info(unit, filename, extracted_text)
-                flash(f'{unit}の指導案がアップロードされました', 'success')
+            # 指導案情報を保存（Markdownファイルが既に存在すると仮定）
+            lesson_content = load_lesson_plan_content(unit)
+            if lesson_content:
+                save_lesson_plan_info(unit, lesson_content)
+                flash(f'{unit}の指導案が更新されました', 'success')
             else:
-                flash('PDFからテキストを抽出できませんでした', 'error')
-                os.remove(file_path)  # 失敗した場合はファイルを削除
+                flash('指導案の内容を読み込めませんでした', 'error')
         else:
-            flash('PDFファイルのみアップロード可能です', 'error')
+            flash('現在はMarkdown形式の指導案のみ対応しています', 'info')
             
     except Exception as e:
         flash(f'アップロード中にエラーが発生しました: {str(e)}', 'error')
@@ -1124,99 +1378,97 @@ def analyze_student_learning(student_number, unit, logs):
     
     print(f"予想対話数: {len(prediction_chats)}, 考察対話数: {len(reflection_chats)}")
     
-    # 分析プロンプト作成
-    analysis_prompt = f"""小学生の理科学習記録を詳細に分析してください。
+    # 強化された分析プロンプト作成
+    analysis_prompt = f"""小学4年理科学習記録の専門的分析をお願いします。
 
-学習内容: {unit}
+【学習情報】
+学習単元: {unit}
 学習者ID: {student_number}
 
+【分析基準（学習指導要領準拠）】"""
+    
+    # 単元特性を分析基準に追加
+    unit_info = analyze_unit_characteristics(unit)
+    if unit_info:
+        analysis_prompt += f"""
+単元の見方・考え方: {unit_info.get('見方・考え方', '')}
+重点的言語活動: {', '.join(unit_info.get('重点活動', []))}
+生活経験関連: {', '.join(unit_info.get('生活経験', []))}
+キーワード: {', '.join(unit_info.get('キーワード', []))}
+"""
+    
+    # ガイドライン情報を分析基準に追加
+    analysis_prompt += f"""
 {guidelines_context}
 
-【予想段階の記録】"""
+【学習記録】
+◆予想段階の対話記録◆"""
     
-    # 予想段階の記録
+    # 予想段階の記録（分析機能付き）
     for i, chat in enumerate(prediction_chats, 1):
         user_msg = chat['user']
         ai_msg = chat['ai'][:100] + "..." if len(chat['ai']) > 100 else chat['ai']
-        analysis_prompt += f"\n予想対話{i}: 学習者「{user_msg}」 AI「{ai_msg}」"
+        
+        # 児童発言の簡易分析
+        student_analysis = analyze_student_response(user_msg, unit)
+        analysis_prompt += f"""
+対話{i}: 学習者「{user_msg}」→AI「{ai_msg}」
+[分析] 理解度:{student_analysis['理解度']} 言語化:{student_analysis['言語化レベル']} 日常関連:{'○' if student_analysis['日常関連'] else '×'}"""
     
     if prediction_summary:
-        analysis_prompt += f"\n予想まとめ: {prediction_summary}"
+        analysis_prompt += f"\n\n予想段階まとめ: {prediction_summary}"
     
     # 考察段階の記録
-    analysis_prompt += f"\n\n【考察段階の記録】"
+    analysis_prompt += f"\n\n◆考察段階の対話記録◆"
     for i, chat in enumerate(reflection_chats, 1):
         user_msg = chat['user']
         ai_msg = chat['ai'][:100] + "..." if len(chat['ai']) > 100 else chat['ai']
-        analysis_prompt += f"\n考察対話{i}: 学習者「{user_msg}」 AI「{ai_msg}」"
+        
+        # 児童発言の簡易分析
+        student_analysis = analyze_student_response(user_msg, unit)
+        analysis_prompt += f"""
+対話{i}: 学習者「{user_msg}」→AI「{ai_msg}」
+[分析] 理解度:{student_analysis['理解度']} 言語化:{student_analysis['言語化レベル']} 概念理解:{'○' if student_analysis['概念理解'] else '×'}"""
     
     if final_summary:
-        analysis_prompt += f"\n最終考察: {final_summary}"
+        analysis_prompt += f"\n\n考察段階まとめ: {final_summary}"
     
     analysis_prompt += """
 
-【分析観点】
-以下の観点で詳細に分析してください：
+【専門的分析項目】
+★言語活動の質的評価★
+1. 思考の言語化レベル（感覚→観察→因果→一般化の段階）
+2. 見方・考え方の習得状況（単元固有の科学的思考）
+3. 日常経験との関連付け能力
+4. 産婆法による思考深化の効果
 
-1. 予想段階での言語化
-   - 日常経験や既習事項を根拠として言語化できているか
-   - 予想と根拠を関連付けて表現できているか
+★学習到達度評価★
+1. 知識・技能の理解度
+2. 思考・判断・表現の発達度
+3. 学びに向かう力の状況
 
-2. 考察段階での言語化
-   - 実験結果を自分の言葉で表現できているか
-   - 予想との差異について言語化できているか
-   - 日常生活との関連を言葉で説明できているか
+★個別支援提案★
+1. 言語化支援の具体的方法
+2. 次回学習への橋渡し方法
+3. 家庭学習での活用提案
 
-3. 言語活動の深化
-   - 対話を通じて思考が深まっているか
-   - 科学的な理解が言語化されているか
+詳細で建設的な分析をお願いします。"""
 
-JSON形式で出力してください：
-{
-  "evaluation": "総合評価",
-  "prediction_analysis": {
-    "daily_life_connection": "日常体験の活用状況",
-    "prior_knowledge_use": "既習事項の活用状況",
-    "reasoning_quality": "予想の根拠の質"
-  },
-  "reflection_analysis": {
-    "result_verbalization": "結果の言語化状況",
-    "prediction_comparison": "予想との比較",
-    "daily_life_connection": "日常生活との関連付け",
-    "scientific_understanding": "科学的理解の深化"
-  },
-  "language_development": "言語活動の変化と成長",
-  "support_recommendations": ["今後の支援ポイント"]
-}"""
-    
     try:
         print("OpenAI分析開始...")
         response = call_openai_with_retry(analysis_prompt)
         print(f"OpenAI応答: {response[:500]}...")
         
-        # JSONの抽出
-        import re
-        json_match = re.search(r'\{.*\}', response, re.DOTALL)
-        if json_match:
-            json_str = json_match.group(0)
-            return json.loads(json_str)
-        else:
-            return {
-                'evaluation': f'分析結果: {response[:200]}...',
-                'prediction_analysis': {
-                    'daily_life_connection': '分析処理中',
-                    'prior_knowledge_use': '分析処理中',
-                    'reasoning_quality': '分析処理中'
-                },
-                'reflection_analysis': {
-                    'result_verbalization': '分析処理中',
-                    'prediction_comparison': '分析処理中',
-                    'daily_life_connection': '分析処理中',
-                    'scientific_understanding': '分析処理中'
-                },
-                'language_development': '分析処理中',
-                'support_recommendations': ['詳細分析を実施中']
-            }
+        # 応答から有用な情報を抽出
+        return {
+            "analysis_text": response,
+            "unit": unit,
+            "student_number": student_number,
+            "prediction_count": len(prediction_chats),
+            "reflection_count": len(reflection_chats),
+            "has_prediction_summary": bool(prediction_summary),
+            "has_final_summary": bool(final_summary)
+        }
     
     except Exception as e:
         print(f"分析エラー: {str(e)}")
@@ -1781,15 +2033,14 @@ def upload_guidelines():
         # ファイル保存
         file.save(filepath)
         
-        # PDFからテキスト抽出
+        # ファイルの内容を読み込み（現在はMarkdown形式のみ対応）
         try:
-            with open(filepath, 'rb') as pdf_file:
-                pdf_reader = PdfReader(pdf_file)
-                content = ""
-                for page in pdf_reader.pages:
-                    content += page.extract_text() + "\n"
+            # アップロードされたファイルがMarkdown形式と仮定して処理
+            content = f"アップロード済みファイル: {filename}\n"
+            content += f"アップロード日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            content += "注意: 現在はMarkdown形式の指導要領のみ対応しています。\n"
         except Exception as e:
-            content = f"テキスト抽出エラー: {str(e)}"
+            content = f"ファイル処理エラー: {str(e)}"
         
         # インデックスファイルに追加
         index_file = os.path.join(guidelines_dir, 'guidelines_index.json')
