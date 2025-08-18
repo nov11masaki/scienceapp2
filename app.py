@@ -42,8 +42,7 @@ def allowed_file(filename):
 
 # 教員認証情報（実際の運用では環境変数やデータベースに保存）
 TEACHER_CREDENTIALS = {
-    'teacher': 'science2025',
-    'admin': 'admin123'
+    # 本番運用時は適切な認証システムを実装してください
 }
 
 # 認証チェック用デコレータ
@@ -653,9 +652,12 @@ def reflect_chat():
     if conversation_turn <= 2:
         system_prompt += """
 第1段階: 実験結果の言語化
-- 「実験でどんなことが起こりましたか？」
-- 「もう少し詳しく教えてください」
-- 子どもが結果を自分の言葉で具体的に説明できるまで聞く
+- 子どもが実験結果について何か話したら、その内容を受け止める
+- 「そうですね」「なるほど」でまず受け止めてから次の質問
+- 1回目: 「実験でどんなことが起こりましたか？」
+- 2回目以降: 子どもの答えに応じて「もう少し詳しく教えて」「どんな感じでしたか？」など
+- 同じ質問は繰り返さない
+- 子どもが具体的に説明できたら次の段階へ
 """
     elif conversation_turn <= 4:
         system_prompt += """
@@ -688,14 +690,24 @@ def reflect_chat():
 3. JSON形式は絶対に使わない
 4. 普通の日本語で話す
 5. 専門用語は使わない
+6. 同じ質問は繰り返さない - 子どもの答えに応じて変化させる
+7. 子どもが既に答えた内容については再度聞かない
 
 **良い応答例:**
 「そうですね。予想と同じでしたか？」
 「なるほど。どうしてそう思いますか？」
 「いいですね。どんな気持ちですか？」
 
+**悪い例（避けるべき）:**
+- 同じ質問の繰り返し
+- 子どもが既に答えた内容を再度聞く
+- 長すぎる質問
+
 今は{conversation_turn}回目の対話です。
-子どもの発言を受け止めてから、適切な質問を1つしてください："""
+子どもの発言を受け止めてから、適切な質問を1つしてください。
+
+**重要:** 対話履歴を確認して、子どもが既に答えた内容は聞き直さないでください。
+子どもの前の発言に基づいて、次のステップに進む質問をしてください："""
     
     # 対話履歴を含めてプロンプト作成
     full_prompt = system_prompt + "\n\n対話履歴:\n"
@@ -972,59 +984,6 @@ def teacher_logs():
                          current_date=date,
                          current_unit=unit,
                          current_student=student,
-                         available_dates=available_dates,
-                         teacher_id=session.get('teacher_id'))
-
-@app.route('/teacher/student/<student_number>')
-@require_teacher_auth
-def teacher_student_detail(student_number):
-    """個別学生の詳細ログ表示"""
-    # デフォルト日付を最新のログがある日付に設定
-    available_dates = get_available_log_dates()
-    default_date = available_dates[0]['raw'] if available_dates else datetime.now().strftime('%Y%m%d')
-    
-    date = request.args.get('date', default_date)
-    unit = request.args.get('unit', '')
-    
-    logs = load_learning_logs(date)
-    
-    # 該当学生のログを抽出
-    student_logs = [log for log in logs if log.get('student_number') == student_number]
-    
-    # 単元でフィルタ
-    if unit:
-        student_logs = [log for log in student_logs if log.get('unit') == unit]
-    
-    # 単元ごとにグループ化
-    units_data = {}
-    for log in student_logs:
-        unit_name = log.get('unit')
-        if unit_name not in units_data:
-            units_data[unit_name] = {
-                'unit_name': unit_name,
-                'logs': [],
-                'prediction_chats': [],
-                'reflection_chats': [],
-                'prediction_summary': None,
-                'final_summary': None
-            }
-        
-        units_data[unit_name]['logs'].append(log)
-        
-        if log.get('log_type') == 'prediction_chat':
-            units_data[unit_name]['prediction_chats'].append(log)
-        elif log.get('log_type') == 'reflection_chat':
-            units_data[unit_name]['reflection_chats'].append(log)
-        elif log.get('log_type') == 'prediction_summary':
-            units_data[unit_name]['prediction_summary'] = log
-        elif log.get('log_type') == 'final_summary':
-            units_data[unit_name]['final_summary'] = log
-    
-    return render_template('teacher/student_detail.html',
-                         student_number=student_number,
-                         units_data=units_data,
-                         current_unit=unit,
-                         current_date=date,
                          available_dates=available_dates,
                          teacher_id=session.get('teacher_id'))
 
@@ -1918,7 +1877,4 @@ def delete_guidelines(doc_id):
         return jsonify({'error': f'削除に失敗しました: {str(e)}'}), 500
 
 if __name__ == '__main__':
-    import os
-    port = int(os.environ.get('PORT', 5014))
-    debug = os.environ.get('ENVIRONMENT') != 'production'
-    app.run(host='0.0.0.0', debug=debug, port=port)
+    app.run(debug=True, port=5014)
