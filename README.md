@@ -289,6 +289,48 @@ science-sup/
 - **Flask ドキュメント**: https://flask.palletsprojects.com/
 - **Bootstrap 5**: https://getbootstrap.com/
 
+## 🚀 Renderでのデプロイ
+
+### 前提条件
+- GitHubアカウント
+- Renderアカウント（無料プランで利用可能）
+- OpenAI APIキー
+
+### デプロイ手順
+
+1. **GitHubリポジトリの準備**
+   ```bash
+   git add .
+   git commit -m "Renderデプロイ対応"
+   git push origin main
+   ```
+
+2. **Render Webサービスの作成**
+   - [Render Dashboard](https://dashboard.render.com)にログイン
+   - "New +" → "Web Service"を選択
+   - GitHubリポジトリを連携
+   - `nov11masaki/scienceapp2`を選択
+
+3. **設定項目**
+   - **Name**: `scienceapp2`（任意の名前）
+   - **Environment**: `Python 3`
+   - **Build Command**: `pip install -r requirements.txt`
+   - **Start Command**: `gunicorn --bind 0.0.0.0:$PORT app:app`
+   - **Plan**: `Free`
+
+4. **環境変数の設定**
+   - `OPENAI_API_KEY`: あなたのOpenAI APIキー
+   - `ENVIRONMENT`: `production`
+
+5. **デプロイ実行**
+   - "Create Web Service"をクリック
+   - 自動的にビルドとデプロイが開始されます
+
+### 注意事項
+- 無料プランでは、非アクティブ時にサービスがスリープします
+- 初回アクセス時に起動に時間がかかる場合があります
+- `.env`ファイルは`.gitignore`により除外されています（セキュリティ対策）
+
 ---
 
 このシステムは、小学校理科教育における「予想→実験→考察」の学習サイクルを、AI技術を活用して効果的に支援することを目的としています。産婆法的アプローチにより、学習者の主体的な学びを促進し、教員には詳細な学習分析機能を提供します。

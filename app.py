@@ -975,6 +975,59 @@ def teacher_logs():
                          available_dates=available_dates,
                          teacher_id=session.get('teacher_id'))
 
+@app.route('/teacher/student/<student_number>')
+@require_teacher_auth
+def teacher_student_detail(student_number):
+    """個別学生の詳細ログ表示"""
+    # デフォルト日付を最新のログがある日付に設定
+    available_dates = get_available_log_dates()
+    default_date = available_dates[0]['raw'] if available_dates else datetime.now().strftime('%Y%m%d')
+    
+    date = request.args.get('date', default_date)
+    unit = request.args.get('unit', '')
+    
+    logs = load_learning_logs(date)
+    
+    # 該当学生のログを抽出
+    student_logs = [log for log in logs if log.get('student_number') == student_number]
+    
+    # 単元でフィルタ
+    if unit:
+        student_logs = [log for log in student_logs if log.get('unit') == unit]
+    
+    # 単元ごとにグループ化
+    units_data = {}
+    for log in student_logs:
+        unit_name = log.get('unit')
+        if unit_name not in units_data:
+            units_data[unit_name] = {
+                'unit_name': unit_name,
+                'logs': [],
+                'prediction_chats': [],
+                'reflection_chats': [],
+                'prediction_summary': None,
+                'final_summary': None
+            }
+        
+        units_data[unit_name]['logs'].append(log)
+        
+        if log.get('log_type') == 'prediction_chat':
+            units_data[unit_name]['prediction_chats'].append(log)
+        elif log.get('log_type') == 'reflection_chat':
+            units_data[unit_name]['reflection_chats'].append(log)
+        elif log.get('log_type') == 'prediction_summary':
+            units_data[unit_name]['prediction_summary'] = log
+        elif log.get('log_type') == 'final_summary':
+            units_data[unit_name]['final_summary'] = log
+    
+    return render_template('teacher/student_detail.html',
+                         student_number=student_number,
+                         units_data=units_data,
+                         current_unit=unit,
+                         current_date=date,
+                         available_dates=available_dates,
+                         teacher_id=session.get('teacher_id'))
+
 @app.route('/teacher/export')
 @require_teacher_auth
 def teacher_export():
@@ -1865,4 +1918,7 @@ def delete_guidelines(doc_id):
         return jsonify({'error': f'削除に失敗しました: {str(e)}'}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5014)
+    import os
+    port = int(os.environ.get('PORT', 5014))
+    debug = os.environ.get('ENVIRONMENT') != 'production'
+    app.run(host='0.0.0.0', debug=debug, port=port)

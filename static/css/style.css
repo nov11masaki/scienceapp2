@@ -460,7 +460,7 @@ body {
 }
 
 .user-message .message-avatar::before {
-    content: "�";
+    content: "👤";
     font-size: 1.3rem;
 }
 
