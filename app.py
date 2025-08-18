@@ -42,7 +42,8 @@ def allowed_file(filename):
 
 # 教員認証情報（実際の運用では環境変数やデータベースに保存）
 TEACHER_CREDENTIALS = {
-    # 本番運用時は適切な認証システムを実装してください
+    'teacher': 'science2025',
+    'admin': 'admin123'
 }
 
 # 認証チェック用デコレータ
