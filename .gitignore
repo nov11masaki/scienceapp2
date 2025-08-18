@@ -1,0 +1,74 @@
+# 環境変数ファイル（APIキー等の機密情報）
+.env
+
+# Python関連
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Environments
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE関連
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS関連
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# ログファイル（学習データは除外）
+logs/
+*.log
+
+# アップロード済みファイル
+lesson_plans/
+
+# 一時ファイル
+*.tmp
+*.temp
