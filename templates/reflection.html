@@ -29,12 +29,7 @@
                 
                 <div class="chat-container">
                     <div class="chat-messages" id="reflectionMessages">
-                        <div class="message ai-message">
-                            <div class="message-avatar"></div>
-                            <div class="message-content">
-                                実験お疲れさまでした！実験の結果はどうでしたか？具体的に教えてください。
-                            </div>
-                        </div>
+                        <!-- 初期メッセージはJavaScriptで動的に追加 -->
                     </div>
                     
                     <div class="chat-input-section">
@@ -83,7 +78,7 @@ let reflectionCount = 0;
 // ページ読み込み時の初期化
 document.addEventListener('DOMContentLoaded', function() {
     // 初期メッセージを表示
-    addReflectionMessage('実験おつかれさまでした！実験で何が見えましたか？', 'ai');
+    addReflectionMessage('実験でどんなことが起こりましたか？', 'ai');
 });
 
 document.getElementById('sendReflectionButton').addEventListener('click', sendReflection);
