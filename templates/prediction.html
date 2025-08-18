@@ -40,9 +40,7 @@
                     
                     <div class="chat-messages" id="chatMessages">
                         <div class="message ai-message">
-                            <div class="message-avatar">
-                                <i class="fas fa-robot"></i>
-                            </div>
+                            <div class="message-avatar"></div>
                             <div class="message-content">
                                 こんにちは！この課題について、どのような結果になると思いますか？あなたの考えを聞かせてください。
                             </div>
@@ -209,12 +207,8 @@ function addMessage(content, type) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${type}-message`;
     
-    const avatar = type === 'user' ? '<i class="fas fa-user"></i>' : '<i class="fas fa-robot"></i>';
-    
     messageDiv.innerHTML = `
-        <div class="message-avatar">
-            ${avatar}
-        </div>
+        <div class="message-avatar"></div>
         <div class="message-content">
             ${content}
         </div>
@@ -231,9 +225,7 @@ function addRetryButton() {
     const retryDiv = document.createElement('div');
     retryDiv.className = 'message ai-message retry-message';
     retryDiv.innerHTML = `
-        <div class="message-avatar">
-            <i class="fas fa-robot"></i>
-        </div>
+        <div class="message-avatar"></div>
         <div class="message-content">
             <button class="btn btn-outline-primary btn-sm" onclick="retryLastMessage()">
                 <i class="fas fa-redo me-2"></i>再試行

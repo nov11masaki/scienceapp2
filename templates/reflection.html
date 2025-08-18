@@ -30,9 +30,7 @@
                 <div class="chat-container">
                     <div class="chat-messages" id="reflectionMessages">
                         <div class="message ai-message">
-                            <div class="message-avatar">
-                                <i class="fas fa-robot"></i>
-                            </div>
+                            <div class="message-avatar"></div>
                             <div class="message-content">
                                 実験お疲れさまでした！実験の結果はどうでしたか？具体的に教えてください。
                             </div>
@@ -157,12 +155,8 @@ function addReflectionMessage(content, type) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${type}-message`;
     
-    const avatar = type === 'user' ? '<i class="fas fa-user"></i>' : '<i class="fas fa-robot"></i>';
-    
     messageDiv.innerHTML = `
-        <div class="message-avatar">
-            ${avatar}
-        </div>
+        <div class="message-avatar"></div>
         <div class="message-content">
             ${content}
         </div>

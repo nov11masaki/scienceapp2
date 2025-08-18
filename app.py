@@ -42,8 +42,7 @@ def allowed_file(filename):
 
 # 教員認証情報（実際の運用では環境変数やデータベースに保存）
 TEACHER_CREDENTIALS = {
-    'teacher': 'science2025',  # ID: teacher, パスワード: science2025
-    'admin': 'admin123'       # ID: admin, パスワード: admin123
+    # 本番運用時は適切な認証システムを実装してください
 }
 
 # 認証チェック用デコレータ
@@ -1009,94 +1008,6 @@ def teacher_export():
             })
     
     return jsonify({'message': f'エクスポートが完了しました: {output_file}'})
-
-@app.route('/resume_session', methods=['GET', 'POST'])
-def resume_session():
-    """セッション復帰機能"""
-    if request.method == 'POST':
-        data = request.get_json()
-        student_number = data.get('student_number')
-        unit = data.get('unit')
-        
-        if student_number and unit:
-            # セッション情報を復元
-            session['student_number'] = student_number
-            session['unit'] = unit
-            
-            # 最新の学習ログを読み込んで対話履歴を復元
-            try:
-                today = datetime.now().strftime('%Y%m%d')
-                log_file = f'logs/learning_log_{today}.json'
-                
-                if os.path.exists(log_file):
-                    with open(log_file, 'r', encoding='utf-8') as f:
-                        all_logs = json.load(f)
-                    
-                    # 該当する学生の今日のログを取得
-                    student_logs = [log for log in all_logs if 
-                                  log.get('student_number') == student_number and 
-                                  log.get('unit') == unit]
-                    
-                    if student_logs:
-                        # 最新のログ状態に基づいて復帰先を判定
-                        latest_log = student_logs[-1]
-                        log_type = latest_log.get('log_type')
-                        
-                        # 対話履歴を復元
-                        conversation = []
-                        reflection_conversation = []
-                        prediction_summary = ""
-                        final_summary = ""
-                        
-                        for log in student_logs:
-                            if log.get('log_type') == 'prediction_chat':
-                                data_content = log.get('data', {})
-                                user_msg = data_content.get('user_message')
-                                ai_msg = data_content.get('ai_response')
-                                if user_msg and ai_msg:
-                                    conversation.append({'role': 'user', 'content': user_msg})
-                                    conversation.append({'role': 'assistant', 'content': ai_msg})
-                            elif log.get('log_type') == 'reflection_chat':
-                                data_content = log.get('data', {})
-                                user_msg = data_content.get('user_message')
-                                ai_msg = data_content.get('ai_response')
-                                if user_msg and ai_msg:
-                                    reflection_conversation.append({'role': 'user', 'content': user_msg})
-                                    reflection_conversation.append({'role': 'assistant', 'content': ai_msg})
-                            elif log.get('log_type') == 'prediction_summary':
-                                session['prediction_summary'] = log.get('data', {}).get('summary', '')
-                            elif log.get('log_type') == 'final_summary':
-                                session['final_summary'] = log.get('data', {}).get('summary', '')
-                        
-                        session['conversation'] = conversation
-                        session['reflection_conversation'] = reflection_conversation
-                        
-                        # 最適な復帰先を判定
-                        if log_type == 'final_summary':
-                            return jsonify({'redirect': '/', 'message': '学習が完了しています'})
-                        elif log_type == 'reflection_chat' or session.get('prediction_summary'):
-                            return jsonify({'redirect': '/reflection', 'message': '考察画面から再開します'})
-                        elif log_type == 'prediction_summary':
-                            return jsonify({'redirect': '/experiment', 'message': '実験画面から再開します'})
-                        elif log_type == 'prediction_chat' or conversation:
-                            return jsonify({'redirect': '/prediction', 'message': '予想画面から再開します'})
-                        else:
-                            return jsonify({'redirect': '/prediction', 'message': '予想画面から開始します'})
-                    else:
-                        # ログがない場合は新規開始
-                        return jsonify({'redirect': '/prediction', 'message': '新しく学習を開始します'})
-                else:
-                    # ログファイルがない場合は新規開始
-                    return jsonify({'redirect': '/prediction', 'message': '新しく学習を開始します'})
-                    
-            except Exception as e:
-                print(f"セッション復帰エラー: {str(e)}")
-                return jsonify({'error': 'セッション復帰に失敗しました'})
-        
-        return jsonify({'error': '出席番号と単元を指定してください'})
-    
-    # GET リクエストの場合は復帰画面を表示
-    return render_template('resume_session.html')
 
 # ログ分析機能
 def load_guidelines_content():
