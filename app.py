@@ -352,6 +352,40 @@ def build_enhanced_prompt(base_prompt, unit=None, stage=None):
     """学習指導要領とMarkdownガイドラインを活用して強化されたプロンプトを構築"""
     enhanced_prompt = base_prompt
     
+    # 言語化支援の重要な指針を最初に追加
+    enhanced_prompt += """
+
+## 最重要：段階別言語化支援の実践
+### 予想段階での支援（概念化はしない）
+1. **体験的表現の受容**: 児童のオノマトペ・感覚的表現をまず受け止める
+2. **一般表現への変換**: 「〜を別の言い方でできないかな？」で支援
+3. **関連経験の引き出し**: 「似たような経験はないかな？」
+4. **予想の根拠明確化**: 「なぜそう思ったの？」「何から考えたの？」
+
+**予想段階では概念化まで進まない** - 言語表現の引き上げと経験活用に集中
+
+### 考察段階での支援（概念化への足掛かりまで）
+1. **結果の言語化**: 実験結果の体験的表現をまず受け止める
+2. **一般表現への変換**: 「〜を別の言い方でできないかな？」で支援
+3. **予想との比較**: 「予想と同じだった？」「違ったところは？」
+4. **経験・既習事項との関連**: 「前に習ったことと似てる？」
+5. **概念化への足掛かり**: 「このことから何が言えそうかな？」
+
+**考察段階では概念化への足掛かりまで** - 結果分析と関連付けを重視
+
+### 対話の基本パターン
+- 児童の発言を必ず受け止める：「そうですね」「なるほど」
+- 1回1つの質問：複数の質問を同時にしない
+- 10文字以内の短い質問：「どうなった？」「なぜかな？」
+- 経験重視：「〜という経験はない？」「家で見たことと似てる？」
+
+### 理科の見方・考え方の活用
+- 量的・関係的視点：「どのくらい？」「前と比べると？」
+- 質的・実体的視点：「何の性質？」「どんな特徴？」
+- 共通性・多様性視点：「他でも同じ？」「違うところは？」
+- 時間的・空間的視点：「いつから？」「どこから変化？」
+"""
+    
     # 学習指導要領の内容を追加（言語活動重視）
     guidelines = get_learning_guidelines()
     if guidelines:
@@ -2138,6 +2172,47 @@ def delete_guidelines(doc_id):
     
     except Exception as e:
         return jsonify({'error': f'削除に失敗しました: {str(e)}'}), 500
+
+@app.route('/teacher/student/<student_number>')
+@require_teacher_auth
+def student_detail(student_number):
+    """学生の詳細ログページ"""
+    unit = request.args.get('unit', '')
+    
+    # デフォルト日付を最新のログがある日付に設定
+    available_dates = get_available_log_dates()
+    default_date = available_dates[0]['raw'] if available_dates else datetime.now().strftime('%Y%m%d')
+    selected_date = request.args.get('date', default_date)
+    
+    # 学習ログを読み込み
+    logs = load_learning_logs(selected_date)
+    
+    # 該当する学生のログを抽出
+    student_logs = [log for log in logs if 
+                   log.get('student_number') == student_number and 
+                   (not unit or log.get('unit') == unit)]
+    
+    print(f"学生{student_number}のログ検索結果: {len(student_logs)}件 (単元: {unit}, 日付: {selected_date})")
+    
+    if not student_logs:
+        flash(f'学生{student_number}番のログがありません。日付や単元を変更してお試しください。', 'warning')
+    
+    # 分析結果を取得
+    analysis = analyze_student_learning(student_number, unit, logs) if student_logs else None
+    
+    # 単元一覧を取得（フィルター用）
+    all_units = list(set([log.get('unit') for log in logs if log.get('unit')]))
+    
+    return render_template('teacher/student_detail.html',
+                         student_number=student_number,
+                         unit=unit,
+                         current_unit=unit,
+                         current_date=selected_date,
+                         logs=student_logs,
+                         analysis=analysis,
+                         available_dates=available_dates,
+                         units_data={unit_name: {} for unit_name in all_units},
+                         teacher_id=session.get('teacher_id', 'teacher'))
 
 if __name__ == '__main__':
     app.run(debug=True, port=5014)

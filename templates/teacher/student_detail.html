@@ -58,27 +58,48 @@
         </div>
         {% else %}
 
-        <!-- 単元別データ表示 -->
-        {% for unit_name, unit_data in units_data.items() %}
-        <div class="unit-section mb-4">
-            <div class="unit-header">
-                <h4 class="unit-title">
-                    <i class="fas fa-book text-success me-2"></i>
-                    {{ unit_name }}
-                </h4>
-                <div class="unit-stats">
-                    <span class="badge bg-primary me-2">
-                        予想対話: {{ unit_data.prediction_chats|length }}回
-                    </span>
-                    <span class="badge bg-info me-2">
-                        振り返り対話: {{ unit_data.reflection_chats|length }}回
-                    </span>
-                    {% if unit_data.prediction_summary %}
-                    <span class="badge bg-success me-2">予想まとめ完了</span>
+        <!-- ログ表示エリア -->
+        <div class="logs-container">
+            {% if logs %}
+                {% set log_groups = {} %}
+                {% for log in logs %}
+                    {% set unit_name = log.unit or '単元未設定' %}
+                    {% if unit_name not in log_groups %}
+                        {% set _ = log_groups.update({unit_name: {'prediction_chats': [], 'reflection_chats': [], 'prediction_summary': None, 'final_summary': None}}) %}
                     {% endif %}
-                    {% if unit_data.final_summary %}
-                    <span class="badge bg-warning">最終まとめ完了</span>
+                    {% if log.log_type == 'prediction_chat' %}
+                        {% set _ = log_groups[unit_name]['prediction_chats'].append(log) %}
+                    {% elif log.log_type == 'reflection_chat' %}
+                        {% set _ = log_groups[unit_name]['reflection_chats'].append(log) %}
+                    {% elif log.log_type == 'prediction_summary' %}
+                        {% set _ = log_groups[unit_name].update({'prediction_summary': log}) %}
+                    {% elif log.log_type == 'final_summary' %}
+                        {% set _ = log_groups[unit_name].update({'final_summary': log}) %}
                     {% endif %}
+                {% endfor %}
+
+                {% for unit_name, unit_data in log_groups.items() %}
+                <div class="unit-section mb-4">
+                    <div class="unit-header">
+                        <h4 class="unit-title">
+                            <i class="fas fa-book text-success me-2"></i>
+                            {{ unit_name }}
+                        </h4>
+                        <div class="unit-stats">
+                            <span class="badge bg-primary me-2">
+                                予想対話: {{ unit_data.prediction_chats|length }}回
+                            </span>
+                            <span class="badge bg-info me-2">
+                                振り返り対話: {{ unit_data.reflection_chats|length }}回
+                            </span>
+                            {% if unit_data.prediction_summary %}
+                            <span class="badge bg-success me-2">予想まとめ完了</span>
+                            {% endif %}
+                            {% if unit_data.final_summary %}
+                            <span class="badge bg-warning">最終まとめ完了</span>
+                            {% endif %}
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -263,4 +284,36 @@ function applyFilters() {
     border: 1px solid #dee2e6;
 }
 </style>
+
+<script>
+function applyFilters() {
+    const dateFilter = document.getElementById('dateFilter').value;
+    const unitFilter = document.getElementById('unitFilter').value;
+    
+    // 現在のURLパラメータを構築
+    const params = new URLSearchParams();
+    if (unitFilter) params.append('unit', unitFilter);
+    if (dateFilter) params.append('date', dateFilter);
+    
+    // ページをリロードして新しいフィルターを適用
+    const baseUrl = window.location.pathname;
+    const newUrl = params.toString() ? `${baseUrl}?${params.toString()}` : baseUrl;
+    window.location.href = newUrl;
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('学生詳細ページ読み込み完了');
+    
+    // ログがない場合の表示調整
+    const logContainer = document.querySelector('.logs-container');
+    if (logContainer && logContainer.children.length === 0) {
+        logContainer.innerHTML = `
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle me-2"></i>
+                この学生のログが見つかりません。他の日付や単元をお試しください。
+            </div>
+        `;
+    }
+});
+</script>
 {% endblock %}
