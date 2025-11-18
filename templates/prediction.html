@@ -39,7 +39,7 @@
             </div>
             
             <div class="chat-container">
-                <div class="api-status" id="apiStatus" style="display: none;">
+                <div class="api-status" id="apiStatus">
                     <div class="alert alert-warning">
                         <i class="fas fa-exclamation-triangle"></i>
                         <span id="apiStatusMessage">AI接続を確認中...</span>
@@ -73,7 +73,7 @@
             
             <!-- 不要な action-buttons 削除 -->
             
-            <div class="summary-section" id="summarySection" style="display: none;">
+            <div class="summary-section" id="summarySection">
                 <div class="summary-card">
                     <h5 class="summary-title">
                         <i class="fas fa-lightbulb"></i>
@@ -116,7 +116,7 @@
             </div>
             
             <!-- 50音表キーボード -->
-            <div class="keyboard-area-fullscreen" id="keyboardArea" style="display: none;">
+            <div class="keyboard-area-fullscreen" id="keyboardArea">
                 <div class="touch-keyboard-panel" id="touchKeyboard">
                     <div class="keyboard-grid-vertical" id="hiraganaKeys">
                         <!-- JavaScriptで動的に生成 -->
@@ -127,11 +127,11 @@
             <!-- 入力コントロールエリア -->
             <div class="input-controls-area">
                 <!-- 音声入力ボタン -->
-                <div class="voice-input-section mb-2" id="voiceInputSection" style="display: none;">
+                <div class="voice-input-section mb-2" id="voiceInputSection">
                     <button class="btn btn-outline-primary w-100" id="voiceInputBtn">
                         <i class="fas fa-microphone"></i> 音声で入力
                     </button>
-                    <div class="voice-input-status mt-2" id="voiceInputStatus" style="display: none;">
+                    <div class="voice-input-status mt-2" id="voiceInputStatus">
                         <div class="alert alert-info mb-0 py-2">
                             <i class="fas fa-microphone"></i>
                             <span id="voiceStatusText">音声を認識中...</span>
@@ -196,15 +196,8 @@ function showPredictionSummaryButton(reason) {
 document.addEventListener('DOMContentLoaded', function() {
     console.log('DOMContentLoaded イベント発火');
     
-    // localStorage から会話履歴を復元
-    const resume = new URLSearchParams(window.location.search).get('resume');
-    if (resume !== 'false') {
-        // デフォルト: 会話履歴を復元
-        restoreConversationFromLocalStorage();
-    } else {
-        // resume=false の場合: localStorage をクリア
-        clearConversationLocalStorage();
-    }
+    // 常に新規開始のため、localStorage のクリア
+    clearConversationLocalStorage();
     
     // まだまとめが完了していないなら、ボタンを表示
     if (!predictionStatus || !predictionStatus.prediction_summary_created) {
@@ -489,7 +482,12 @@ function startVoiceInput() {
     
     // Web Speech API のサポート確認
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-        alert('お使いのブラウザは音声入力に対応していません。Chrome、Edge、Safariをお使いください。');
+        const isEdge = navigator.userAgent.includes('Edg');
+        if (isEdge) {
+            alert('お使いの Edge ブラウザでは音声入力が対応していない可能性があります。\nChrome または Safari をお使いください。');
+        } else {
+            alert('お使いのブラウザは音声入力に対応していません。Chrome、Edge、Safari をお使いください。');
+        }
         console.error('Web Speech API not supported');
         return;
     }
@@ -499,11 +497,23 @@ function startVoiceInput() {
     try {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         recognition = new SpeechRecognition();
-        recognition.lang = 'ja-JP';
+        
+        // 言語設定（Edge対応: 複数の形式を試す）
+        const browserLang = navigator.language || navigator.userLanguage;
+        if (browserLang && browserLang.startsWith('ja')) {
+            recognition.lang = 'ja-JP';
+        } else if (browserLang && browserLang.startsWith('ja-JP')) {
+            recognition.lang = 'ja-JP';
+        } else {
+            // デフォルト日本語
+            recognition.lang = 'ja-JP';
+        }
+        
         recognition.continuous = true;  // 継続的に認識
         recognition.interimResults = true;  // 途中結果も取得
+        recognition.maxAlternatives = 1;  // 最大候補数
         
-        console.log('SpeechRecognition オブジェクト作成完了');
+        console.log('SpeechRecognition オブジェクト作成完了', {lang: recognition.lang, browser: navigator.userAgent.includes('Edg') ? 'Edge' : 'Other'});
         
         const statusDiv = document.getElementById('voiceInputStatus');
         const statusText = document.getElementById('voiceStatusText');
@@ -571,6 +581,8 @@ function startVoiceInput() {
         
         recognition.onerror = function(event) {
             console.error('音声認識エラー:', event.error);
+            const isEdge = navigator.userAgent.includes('Edg');
+            
             statusDiv.style.display = 'none';
             voiceBtn.innerHTML = '<i class="fas fa-microphone"></i> 音声で入力';
             voiceBtn.classList.remove('btn-danger');
@@ -579,11 +591,18 @@ function startVoiceInput() {
             
             if (event.error === 'no-speech') {
                 alert('音声が検出されませんでした。もう一度お試しください。');
-            } else if (event.error === 'not-allowed') {
-                alert('マイクの使用が許可されていません。ブラウザの設定を確認してください。');
+            } else if (event.error === 'not-allowed' || event.error === 'permission-denied') {
+                if (isEdge) {
+                    alert('Edge ブラウザでマイクの使用が許可されていません。\n1. ブラウザ設定で[プライバシー]→[カメラとマイク]を確認\n2. このサイトのマイクを許可してください');
+                } else {
+                    alert('マイクの使用が許可されていません。ブラウザの設定を確認してください。');
+                }
+            } else if (event.error === 'network') {
+                alert('ネットワークエラーが発生しました。インターネット接続を確認してください。');
             } else if (event.error !== 'aborted') {
                 // aborted エラー（手動停止）以外はアラート表示
-                alert('音声認識エラー: ' + event.error);
+                console.error('詳細:', {error: event.error, browser: isEdge ? 'Edge' : 'Other'});
+                alert('音声認識エラー: ' + event.error + '\nもう一度お試しください。');
             }
         };
         
@@ -608,7 +627,12 @@ function startVoiceInput() {
 function stopVoiceInput() {
     console.log('音声入力停止');
     if (recognition && recognition.isListening) {
-        recognition.stop();
+        try {
+            recognition.stop();
+        } catch (e) {
+            console.error('音声認識停止エラー:', e);
+            recognition.abort();
+        }
         recognition.isListening = false;
     }
 }
