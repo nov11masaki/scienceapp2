@@ -1722,16 +1722,6 @@ def reflection():
         'is_resumption': False,
         'reflection_summary_created': reflection_summary_created
     }
-        print(f"[REFLECTION] 復帰モード: conversation_count={reflection_conversation_count}, summary_created={reflection_summary_created}")
-    else:
-        resumption_info = {
-            'is_resumption': False,
-            'reflection_summary_created': False,
-            'last_conversation_count': 0,
-            'last_access': progress.get('last_access', '')
-        }
-        
-        print(f"[REFLECTION] 新規開始モード")
     
     if unit and student_number:
         # 考察段階開始を記録（フラグは修正しない）
