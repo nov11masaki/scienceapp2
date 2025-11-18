@@ -494,6 +494,36 @@ function startVoiceInput() {
     
     console.log('Web Speech API サポート確認OK');
     
+    // 本番環境対応: getUserMedia を先制取得してマイク権限を確認
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        console.log('getUserMedia をリクエスト中...');
+        navigator.mediaDevices.getUserMedia({ audio: true })
+            .then(function(stream) {
+                console.log('マイクアクセス許可取得');
+                // ストリームを停止（音声認識が自動的に使用）
+                stream.getTracks().forEach(track => track.stop());
+                // マイクアクセス許可後に音声認識を開始
+                initializeVoiceRecognition();
+            })
+            .catch(function(error) {
+                console.error('getUserMedia エラー:', error.name, error.message);
+                if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+                    alert('マイクの使用が許可されていません。ブラウザの設定を確認してください。');
+                } else if (error.name === 'NotFoundError') {
+                    alert('マイクが見つかりません。');
+                } else {
+                    alert('マイクアクセスエラー: ' + error.message);
+                }
+            });
+    } else {
+        // getUserMedia がない場合は直接音声認識を開始
+        console.log('getUserMedia がないため、直接音声認識を開始します');
+        initializeVoiceRecognition();
+    }
+}
+
+// 音声認識の初期化と開始
+function initializeVoiceRecognition() {
     try {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         recognition = new SpeechRecognition();
@@ -590,7 +620,7 @@ function startVoiceInput() {
             recognition.isListening = false;
             
             if (event.error === 'no-speech') {
-                alert('音声が検出されませんでした。もう一度お試しください。');
+                alert('音声が検出されませんでした。もう一度お試しください。\n\n本番環境の場合:\n1. ページを https で開いているか確認\n2. マイクのプライバシー設定を確認\n3. 別のアプリがマイクを使用していないか確認');
             } else if (event.error === 'not-allowed' || event.error === 'permission-denied') {
                 if (isEdge) {
                     alert('Edge ブラウザでマイクの使用が許可されていません。\n1. ブラウザ設定で[プライバシー]→[カメラとマイク]を確認\n2. このサイトのマイクを許可してください');
