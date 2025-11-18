@@ -16,7 +16,7 @@
                     <span class="badge bg-primary fs-6">{{ unit }}</span>
                 </div>
                 <!-- ボタンを右上に配置 -->
-                <div style="position: absolute; top: 10px; right: 10px; display: flex; gap: 8px;">
+                <div class="button-container-top-right">
                     <button class="btn btn-secondary btn-sm" id="backToUnitHeaderButton" onclick="goBackToUnitSelectionFromReflection()">
                         <i class="fas fa-arrow-left me-2"></i>
                         単元選択に戻る
@@ -39,7 +39,7 @@
             </div>
             
             <div class="chat-container">
-                <div class="api-status" id="apiStatus" style="display: none;">
+                <div class="api-status" id="apiStatus">
                     <div class="alert alert-warning">
                         <i class="fas fa-exclamation-triangle"></i>
                         <span id="apiStatusMessage">AI接続を確認中...</span>
@@ -58,7 +58,7 @@
                     </div>
                     
                     <!-- 入力エリア（直接入力可能） -->
-                    <div class="message user-message user-input-area input-compact" style="margin-top: 12px;">
+                    <div class="message user-message user-input-area input-compact">
                         <div class="user-input-wrapper">
                             <div class="input-with-send">
                                 <textarea class="user-input-bubble placeholder-input" id="messageInput" placeholder="ここに入力してください"></textarea>
@@ -73,7 +73,7 @@
             
             <!-- 不要な action-buttons 削除 -->
             
-            <div class="summary-section" id="summarySection" style="display: none;">
+            <div class="summary-section" id="summarySection">
                 <div class="summary-card">
                     <h5 class="summary-title">
                         <i class="fas fa-graduation-cap"></i>
@@ -116,7 +116,7 @@
             </div>
             
             <!-- 50音表キーボード -->
-            <div class="keyboard-area-fullscreen" id="keyboardArea" style="display: none;">
+            <div class="keyboard-area-fullscreen" id="keyboardArea">
                 <div class="touch-keyboard-panel" id="touchKeyboard">
                     <div class="keyboard-grid-vertical" id="hiraganaKeys">
                         <!-- JavaScriptで動的に生成 -->
@@ -127,11 +127,11 @@
             <!-- 入力コントロールエリア -->
             <div class="input-controls-area">
                 <!-- 音声入力ボタン -->
-                <div class="voice-input-section mb-2" id="voiceInputSection" style="display: none;">
+                <div class="voice-input-section mb-2" id="voiceInputSection">
                     <button class="btn btn-outline-primary w-100" id="voiceInputBtn">
                         <i class="fas fa-microphone"></i> 音声で入力
                     </button>
-                    <div class="voice-input-status mt-2" id="voiceInputStatus" style="display: none;">
+                    <div class="voice-input-status mt-2" id="voiceInputStatus">
                         <div class="alert alert-info mb-0 py-2">
                             <i class="fas fa-microphone"></i>
                             <span id="voiceStatusText">音声を認識中...</span>
