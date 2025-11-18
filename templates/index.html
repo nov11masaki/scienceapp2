@@ -4,46 +4,53 @@
 
 {% block content %}
 <div class="hero-section">
-    <div class="hero-background"></div>
     <div class="hero-content">
-        <div class="hero-card">
-            <div class="logo-wrapper">
-                <i class="fas fa-flask logo-icon"></i>
-            </div>
-            <h1 class="hero-title">ScienceBuddy</h1>
-            <p class="hero-description">AIが支援する、科学的思考力育成プラットフォーム</p>
-            <div class="hero-buttons">
-                <a href="/select_class" class="btn btn-primary btn-lg">
+        <div class="hero-card text-center">
+            <h1 class="hero-title">
+                <i class="fas fa-flask text-primary"></i>
+                <span>ScienceBuddy</span>
+            </h1>
+            <div class="hero-buttons mt-4">
+                <a href="/select_class" class="btn btn-primary btn-lg px-5 py-3">
+                    <i class="fas fa-play me-2"></i>
                     学習を始める
                 </a>
             </div>
         </div>
     </div>
+    <div class="hero-decoration"></div>
 </div>
 
 <div class="features-section">
     <div class="container">
-        <div class="section-header">
-            <h2 class="home-section-title">3つのステップで科学的思考を育成</h2>
+        <div class="section-header text-center mb-5">
+            <h2 class="home-section-title">ScienceBuddyでできること</h2>
+            <p class="section-lead">3つのステップで、科学的思考力を育成</p>
         </div>
-        <div class="features-grid">
-            <div class="feature-item">
-                <div class="feature-step">01</div>
-                <div class="home-feature-icon"><i class="fas fa-brain"></i></div>
-                <h3>予想を立てる</h3>
-                <p>経験や既習事項を引き出し、根拠のある予想へ導きます。</p>
+        <div class="row g-4 home-features">
+            <div class="col-md-4">
+                <div class="home-feature-card h-100 text-center">
+                    <div class="feature-number">01</div>
+                    <div class="home-feature-icon"><i class="fas fa-brain"></i></div>
+                    <h3>予想を立てる</h3>
+                    <p>経験や既習事項を引き出し、根拠のある予想へ導きます。</p>
+                </div>
             </div>
-            <div class="feature-item">
-                <div class="feature-step">02</div>
-                <div class="home-feature-icon"><i class="fas fa-microscope"></i></div>
-                <h3>実験を見通す</h3>
-                <p>観察の視点や記録の仕方を整理し、変化に気づく目を育てます。</p>
+            <div class="col-md-4">
+                <div class="home-feature-card h-100 text-center">
+                    <div class="feature-number">02</div>
+                    <div class="home-feature-icon"><i class="fas fa-microscope"></i></div>
+                    <h3>実験を見通す</h3>
+                    <p>観察の視点や記録の仕方を整理し、変化に気づく目を育てます。</p>
+                </div>
             </div>
-            <div class="feature-item">
-                <div class="feature-step">03</div>
-                <div class="home-feature-icon"><i class="fas fa-lightbulb"></i></div>
-                <h3>考察をまとめる</h3>
-                <p>結果と予想を比べて「さらに言えること」を言語化します。</p>
+            <div class="col-md-4">
+                <div class="home-feature-card h-100 text-center">
+                    <div class="feature-number">03</div>
+                    <div class="home-feature-icon"><i class="fas fa-lightbulb"></i></div>
+                    <h3>考察をまとめる</h3>
+                    <p>結果と予想を比べて「さらに言えること」を言語化します。</p>
+                </div>
             </div>
         </div>
     </div>
