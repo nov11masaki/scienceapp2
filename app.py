@@ -537,8 +537,8 @@ def call_openai_with_retry(prompt, max_retries=3, delay=2, unit=None, stage=None
             start_time = time.time()
             
             # stage（学習段階）に応じてtemperatureを設定
-            # 予想段階: より創造的な回答 (0.8)
-            # 考察段階: より一貫性のある回答 (0.3)
+            # 予想段階: より創造的で多様な回答 (1.0)
+            # 考察段階: より一貫性のある回答 (0.8)
             if stage == 'prediction':
                 temperature = 1.0
             elif stage == 'reflection':
