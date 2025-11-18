@@ -1,0 +1,2502 @@
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash, Response
+import openai
+import os
+from dotenv import load_dotenv
+import json
+from datetime import datetime
+import csv
+import time
+import hashlib
+import ssl
+import certifi
+import urllib3
+import re
+import glob
+import uuid
+import zipfile
+import tempfile
+from pathlib import Path
+from functools import lru_cache
+from werkzeug.utils import secure_filename
+import numpy as np
+from sklearn.cluster import KMeans
+
+
+# 環境変数を読み込み
+load_dotenv()
+
+# 学習進行状況管理用のファイルパス
+LEARNING_PROGRESS_FILE = 'learning_progress.json'
+PROMPTS_DIR = Path('prompts')
+
+# ストレージ設定：GCS（本番環境）またはローカルJSON（開発環境）
+USE_GCS = os.getenv('FLASK_ENV') == 'production' and os.getenv('GCP_PROJECT_ID')
+
+if USE_GCS:
+    try:
+        from google.cloud import storage
+        gcp_project = os.getenv('GCP_PROJECT_ID')
+        storage_client = storage.Client(project=gcp_project)
+        bucket_name = os.getenv('GCS_BUCKET_NAME', 'science-buddy-logs')
+        bucket = storage_client.bucket(bucket_name)
+        # バケット接続確認
+        print(f"[INIT] GCS bucket '{bucket_name}' initialized successfully")
+    except Exception as e:
+        print(f"[INIT] Warning: GCS initialization failed: {e}")
+        USE_GCS = False
+        bucket = None
+else:
+    bucket = None
+
+# SSL証明書の設定
+ssl_context = ssl.create_default_context(cafile=certifi.where())
+
+app = Flask(__name__)
+app.secret_key = 'your-secret-key-here'  # 本番環境では安全なキーに変更
+
+# ファイルアップロード設定
+UPLOAD_FOLDER = 'uploads'  # 一時的なアップロード用
+ALLOWED_EXTENSIONS = {'md', 'txt'}  # Markdownとテキストファイルのみ
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB制限
+
+# アップロードディレクトリが存在しない場合は作成
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+# 教員認証情報（実際の運用では環境変数やデータベースに保存）
+TEACHER_CREDENTIALS = {
+    "teacher": "science",  # 全クラス管理者
+    "4100": "science",  # 1組担任
+    "4200": "science",  # 2組担任
+    "4300": "science",  # 3組担任
+    "4400": "science",  # 4組担任
+    "5000": "science",  # 研究室管理者
+}
+
+# 教員IDとクラスの対応
+TEACHER_CLASS_MAPPING = {
+    "teacher": ["class1", "class2", "class3", "class4", "lab"],  # 全クラス管理可能
+    "4100": ["class1"],  # 1組のみ
+    "4200": ["class2"],  # 2組のみ
+    "4300": ["class3"],  # 3組のみ
+    "4400": ["class4"],  # 4組のみ
+    "5000": ["lab"],  # 研究室のみ
+}
+
+# 生徒IDとクラスの対応
+STUDENT_CLASS_MAPPING = {
+    "class1": list(range(4101, 4131)),  # 4101-4130 (1組1-30番)
+    "class2": list(range(4201, 4231)),  # 4201-4230 (2組1-30番)
+    "class3": list(range(4301, 4331)),  # 4301-4330 (3組1-30番)
+    "class4": list(range(4401, 4431)),  # 4401-4430 (4組1-30番)
+    "lab": list(range(5001, 5031)),     # 5001-5030 (研究室1-30番)
+}
+
+# ログ削除用パスワード
+LOG_DELETE_PASSWORD = "RIKA"  # ログを消す際のパスワード
+
+# 同時セッション管理用（同じアカウントの同時ログインを防止）
+active_sessions = {}  # {student_id: session_id}
+session_devices = {}  # {session_id: device_info}
+
+def get_device_fingerprint():
+    """デバイスフィンガープリントを生成"""
+    import hashlib
+    ua = request.headers.get('User-Agent', 'unknown')
+    ip = request.remote_addr
+    device_info = f"{ua}:{ip}"
+    fingerprint = hashlib.md5(device_info.encode()).hexdigest()
+    return fingerprint
+
+def check_session_conflict(student_id):
+    """同一学生IDの他セッションを検出"""
+    current_device = get_device_fingerprint()
+    
+    if student_id in active_sessions:
+        previous_session_id = active_sessions[student_id]
+        previous_device = session_devices.get(previous_session_id)
+        
+        # 異なるデバイスからのアクセス
+        if previous_device and previous_device != current_device:
+            return True, previous_session_id, previous_device
+    
+    return False, None, None
+
+def register_session(student_id, session_id):
+    """セッションを登録"""
+    device_fingerprint = get_device_fingerprint()
+    active_sessions[student_id] = session_id
+    session_devices[session_id] = device_fingerprint
+
+def clear_session(session_id):
+    """セッションをクリア"""
+    # student_idを逆引きして削除
+    for student_id, sid in list(active_sessions.items()):
+        if sid == session_id:
+            del active_sessions[student_id]
+            break
+    
+    if session_id in session_devices:
+        del session_devices[session_id]
+
+def normalize_class_value(class_value):
+    """クラス指定の表記ゆれを統一（lab -> '5' など）"""
+    if class_value is None:
+        return None
+    value_str = str(class_value).strip()
+    if not value_str:
+        return None
+    if value_str.lower() == 'lab':
+        return '5'
+    return value_str
+
+def normalize_class_value_int(class_value):
+    """クラス指定を整数に変換（lab も 5 として扱う）"""
+    normalized = normalize_class_value(class_value)
+    if normalized is None:
+        return None
+    try:
+        return int(normalized)
+    except ValueError:
+        return None
+
+# 認証チェック用デコレータ
+def require_teacher_auth(f):
+    def decorated_function(*args, **kwargs):
+        if not session.get('teacher_authenticated'):
+            return redirect(url_for('teacher_login'))
+        return f(*args, **kwargs)
+    decorated_function.__name__ = f.__name__
+    return decorated_function
+
+# セッション管理機能（ブラウザ閉鎖後の復帰対応）
+SESSION_STORAGE_FILE = 'session_storage.json'
+
+def save_session_to_db(student_id, unit, stage, conversation_data):
+    """セッションデータをデータベースに保存（GCS/ローカルハイブリッド）"""
+    session_entry = {
+        'timestamp': datetime.now().isoformat(),
+        'student_id': student_id,
+        'unit': unit,
+        'stage': stage,  # 'prediction' or 'reflection'
+        'conversation': conversation_data
+    }
+    
+    # ローカルに保存（常に実施）
+    _save_session_local(session_entry)
+    
+    # GCSに保存（本番環境）
+    if USE_GCS and bucket:
+        _save_session_gcs(session_entry)
+
+def _save_session_local(session_entry):
+    """セッションをローカルファイルに保存"""
+    try:
+        sessions = {}
+        if os.path.exists(SESSION_STORAGE_FILE):
+            with open(SESSION_STORAGE_FILE, 'r', encoding='utf-8') as f:
+                sessions = json.load(f)
+        
+        student_id = session_entry['student_id']
+        unit = session_entry['unit']
+        stage = session_entry['stage']
+        key = f"{student_id}_{unit}_{stage}"
+        sessions[key] = session_entry
+        
+        with open(SESSION_STORAGE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(sessions, f, ensure_ascii=False, indent=2)
+        print(f"[SESSION_SAVE] Local - {key}")
+    except Exception as e:
+        print(f"[SESSION_SAVE] Local Error: {e}")
+
+def _save_session_gcs(session_entry):
+    """セッションをGCSに保存"""
+    try:
+        from google.cloud import storage
+        student_id = session_entry['student_id']
+        unit = session_entry['unit']
+        stage = session_entry['stage']
+        key = f"{student_id}_{unit}_{stage}"
+        
+        # GCSのパス: sessions/{student_id}/{unit}/{stage}.json
+        gcs_path = f"sessions/{student_id}/{unit}/{stage}.json"
+        blob = bucket.blob(gcs_path)
+        blob.upload_from_string(
+            json.dumps(session_entry, ensure_ascii=False, indent=2),
+            content_type='application/json'
+        )
+        print(f"[SESSION_SAVE] GCS - {gcs_path}")
+    except Exception as e:
+        print(f"[SESSION_SAVE] GCS Error: {e}")
+
+def load_session_from_db(student_id, unit, stage):
+    """セッションデータをデータベースから復元（GCS/ローカルハイブリッド）"""
+    # GCSから読み込み（本番環境）
+    if USE_GCS and bucket:
+        conversation = _load_session_gcs(student_id, unit, stage)
+        if conversation is not None:
+            return conversation
+    
+    # ローカルから読み込み
+    return _load_session_local(student_id, unit, stage)
+
+def _load_session_local(student_id, unit, stage):
+    """セッションをローカルファイルから復元"""
+    try:
+        if not os.path.exists(SESSION_STORAGE_FILE):
+            return []
+        
+        with open(SESSION_STORAGE_FILE, 'r', encoding='utf-8') as f:
+            sessions = json.load(f)
+        
+        key = f"{student_id}_{unit}_{stage}"
+        if key in sessions:
+            print(f"[SESSION_LOAD] Local - {key}")
+            return sessions[key].get('conversation', [])
+    except Exception as e:
+        print(f"[SESSION_LOAD] Local Error: {e}")
+    
+    return []
+
+def _load_session_gcs(student_id, unit, stage):
+    """セッションをGCSから復元"""
+    try:
+        from google.cloud import storage
+        
+        # GCSのパス: sessions/{student_id}/{unit}/{stage}.json
+        gcs_path = f"sessions/{student_id}/{unit}/{stage}.json"
+        blob = bucket.blob(gcs_path)
+        
+        if blob.exists():
+            content = blob.download_as_string().decode('utf-8')
+            data = json.loads(content)
+            print(f"[SESSION_LOAD] GCS - {gcs_path}")
+            return data.get('conversation', [])
+    except Exception as e:
+        print(f"[SESSION_LOAD] GCS Error: {e}")
+    
+    return None
+
+# OpenAI APIの設定
+api_key = os.getenv('OPENAI_API_KEY')
+try:
+    client = openai.OpenAI(api_key=api_key)
+except Exception as e:
+    client = None
+
+# マークダウン記法を除去する関数
+def remove_markdown_formatting(text):
+    """AIの応答からマークダウン記法を除去する"""
+    import re
+    
+    # 太字 **text** や __text__ を通常のテキストに
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+    text = re.sub(r'__(.*?)__', r'\1', text)
+    
+    # 斜体 *text* や _text_ を通常のテキストに
+    text = re.sub(r'\*(.*?)\*', r'\1', text)
+    text = re.sub(r'_(.*?)_', r'\1', text)
+    
+    # 箇条書きの記号を除去
+    text = re.sub(r'^\s*\*\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*-\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*\+\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
+    
+    # 見出し記号 ### text を除去
+    text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
+    
+    # コードブロック ```text``` を除去
+    text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)
+    text = re.sub(r'`(.*?)`', r'\1', text)
+    
+    # 引用記号 > を除去
+    text = re.sub(r'^\s*>\s*', '', text, flags=re.MULTILINE)
+    
+    # その他の記号の重複を整理
+    text = re.sub(r'\s+', ' ', text)  # 複数の空白を1つに
+    text = re.sub(r'\n\s*\n', '\n', text)  # 複数の改行を1つに
+    
+    return text.strip()
+
+# 学習進行状況管理機能
+def load_learning_progress():
+    """学習進行状況を読み込み（ローカル JSON のみ）"""
+    # ローカルファイルから読み込み
+    if os.path.exists(LEARNING_PROGRESS_FILE):
+        try:
+            with open(LEARNING_PROGRESS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, Exception):
+            return {}
+    return {}
+
+def save_learning_progress(progress_data):
+    """学習進行状況を保存（ローカル JSON のみ）"""
+    # ローカルファイルに保存
+    try:
+        with open(LEARNING_PROGRESS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(progress_data, f, ensure_ascii=False, indent=2)
+        print(f"[PROGRESS_SAVE] Local file saved successfully")
+    except Exception as e:
+        print(f"[PROGRESS_SAVE] Error: {e}")
+    else:
+        # ローカルファイルに保存
+        try:
+            with open(LEARNING_PROGRESS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(progress_data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+def get_student_progress(class_number, student_number, unit):
+    """特定の学習者の単元進行状況を取得"""
+    normalized_class = normalize_class_value(class_number)
+    class_number = normalized_class if normalized_class is not None else class_number
+    legacy_ids = []
+    if class_number == '5':
+        legacy_ids.append(f"lab_{student_number}")
+    student_id = f"{class_number}_{student_number}"
+    progress_data = load_learning_progress()
+    for legacy_id in legacy_ids:
+        if legacy_id in progress_data and student_id not in progress_data:
+            progress_data[student_id] = progress_data.pop(legacy_id)
+            save_learning_progress(progress_data)
+            break
+    
+    if student_id not in progress_data:
+        progress_data[student_id] = {}
+    
+    if unit not in progress_data[student_id]:
+        progress_data[student_id][unit] = {
+            "current_stage": "prediction",
+            "last_access": datetime.now().isoformat(),
+            "stage_progress": {
+                "prediction": {
+                    "started": False,
+                    "conversation_count": 0,
+                    "summary_created": False,
+                    "last_message": ""
+                },
+                "experiment": {
+                    "started": False,
+                    "completed": False
+                },
+                "reflection": {
+                    "started": False,
+                    "conversation_count": 0,
+                    "summary_created": False
+                }
+            },
+            "conversation_history": [],
+            "reflection_conversation_history": []
+        }
+    
+    return progress_data[student_id][unit]
+
+def update_student_progress(class_number, student_number, unit, prediction_summary_created=False, reflection_summary_created=False):
+    """学習者の進行状況を更新（フラグのみ保存）"""
+    normalized_class = normalize_class_value(class_number)
+    class_number = normalized_class if normalized_class is not None else class_number
+    progress_data = load_learning_progress()
+    student_id = f"{class_number}_{student_number}"
+    
+    # 現在の進行状況を取得
+    current_progress = get_student_progress(class_number, student_number, unit)
+    
+    # 予想・考察の完了フラグのみ更新
+    if prediction_summary_created:
+        current_progress["stage_progress"]["prediction"]["summary_created"] = True
+    if reflection_summary_created:
+        current_progress["stage_progress"]["reflection"]["summary_created"] = True
+    
+    # 進行状況を保存
+    if student_id not in progress_data:
+        progress_data[student_id] = {}
+    progress_data[student_id][unit] = current_progress
+    
+    save_learning_progress(progress_data)
+    return current_progress
+
+
+def check_resumption_needed(class_number, student_number, unit):
+    """復帰が必要かチェック（現在は常にFalse。セッションリセット方針のため）"""
+    # ページリロード時はセッションがリセットされるため、復帰は不要
+    return False
+
+def get_progress_summary(progress):
+    """進行状況の要約を生成"""
+    stage_progress = progress.get('stage_progress', {})
+    
+    # 考察完了が最優先
+    if stage_progress.get('reflection', {}).get('summary_created', False):
+        return "考察完了"
+    
+    # 予想完了
+    if stage_progress.get('prediction', {}).get('summary_created', False):
+        return "予想完了"
+    
+    return "未開始"
+
+def extract_message_from_json_response(response):
+    """JSON形式のレスポンスから純粋なメッセージを抽出する"""
+    try:
+        # JSON形式かどうか確認
+        if response.strip().startswith('{') and response.strip().endswith('}'):
+            import json
+            parsed = json.loads(response)
+            
+            # よくあるフィールド名から順番に確認
+            common_fields = ['response', 'message', 'question', 'summary', 'text', 'content', 'answer']
+            
+            for field in common_fields:
+                if field in parsed and isinstance(parsed[field], str):
+                    return parsed[field]
+            
+            # その他のフィールドから文字列値を探す
+            for key, value in parsed.items():
+                if isinstance(value, str) and len(value.strip()) > 0:
+                    return value
+                    
+            # JSONだが適切なフィールドがない場合はそのまま返す
+            return response
+                
+        # リスト形式の場合の処理
+        elif response.strip().startswith('[') and response.strip().endswith(']'):
+            import json
+            parsed = json.loads(response)
+            if isinstance(parsed, list) and len(parsed) > 0:
+                # リストの各要素を処理
+                results = []
+                for item in parsed:
+                    if isinstance(item, dict):
+                        # よくあるフィールド名から順番に確認
+                        common_fields = ['予想', 'response', 'message', 'question', 'summary', 'text', 'content']
+                        found = False
+                        for field in common_fields:
+                            if field in item and isinstance(item[field], str):
+                                results.append(item[field])
+                                found = True
+                                break
+                        
+                        # よくあるフィールドが見つからない場合は最初の文字列値を使用
+                        if not found:
+                            for key, value in item.items():
+                                if isinstance(value, str) and len(value.strip()) > 0:
+                                    results.append(value)
+                                    break
+                    elif isinstance(item, str):
+                        results.append(item)
+                
+                # 複数の予想を改行で結合
+                if results:
+                    return '\n'.join(results)
+            return response
+            
+        # JSON形式でない場合はそのまま返す
+        else:
+            return response
+            
+    except (json.JSONDecodeError, Exception) as e:
+        return response
+
+# APIコール用のリトライ関数
+def call_openai_with_retry(prompt, max_retries=3, delay=2, unit=None, stage=None, model_override=None, enable_cache=False):
+    """OpenAI APIを呼び出し、エラー時はリトライする
+    
+    Args:
+        prompt: 文字列またはメッセージリスト
+        max_retries: リトライ回数
+        delay: リトライ間隔（秒）
+        unit: 単元名
+        stage: 学習段階
+        model_override: モデルオーバーライド
+        enable_cache: プロンプトキャッシング有効化（システムメッセージに対して有効）
+    """
+    if client is None:
+        return "AI システムの初期化に問題があります。管理者に連絡してください。"
+    
+    # promptがリストの場合（メッセージフォーマット）
+    if isinstance(prompt, list):
+        messages = prompt
+    else:
+        # promptが文字列の場合（従来フォーマット）
+        messages = [{"role": "user", "content": prompt}]
+    
+    # キャッシング有効時、システムメッセージにキャッシュ制御を追加
+    if enable_cache:
+        for msg in messages:
+            if msg.get('role') == 'system':
+                msg['cache_control'] = {'type': 'ephemeral'}
+    
+    for attempt in range(max_retries):
+        try:
+            import time
+            start_time = time.time()
+            
+            # stage（学習段階）に応じてtemperatureを設定
+            # 予想段階: より創造的な回答 (0.8)
+            # 考察段階: より一貫性のある回答 (0.3)
+            if stage == 'prediction':
+                temperature = 0.8
+            elif stage == 'reflection':
+                temperature = 0.3
+            else:
+                temperature = 0.5  # デフォルト
+            
+            model_name = model_override if model_override else "gpt-4o-mini"
+
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                max_tokens=2000,
+                temperature=temperature,
+                timeout=30
+            )
+            
+            if response.choices and response.choices[0].message.content:
+                content = response.choices[0].message.content
+                # マークダウン除去を削除（MDファイルのプロンプトに従う）
+                return content
+            else:
+                raise Exception("空の応答が返されました")
+                
+        except Exception as e:
+            error_msg = str(e)
+            
+            if "API_KEY" in error_msg.upper() or "invalid_api_key" in error_msg.lower():
+                return "APIキーの設定に問題があります。管理者に連絡してください。"
+            elif "QUOTA" in error_msg.upper() or "LIMIT" in error_msg.upper() or "rate_limit_exceeded" in error_msg.lower():
+                return "API利用制限に達しました。しばらく待ってから再度お試しください。"
+            elif "TIMEOUT" in error_msg.upper() or "DNS" in error_msg.upper() or "503" in error_msg:
+                if attempt < max_retries - 1:
+                    wait_time = delay * (attempt + 1)
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    return "ネットワーク接続に問題があります。インターネット接続を確認してください。"
+            elif "400" in error_msg or "INVALID" in error_msg.upper():
+                return "リクエストの形式に問題があります。管理者に連絡してください。"
+            elif "403" in error_msg or "PERMISSION" in error_msg.upper():
+                return "APIの利用権限に問題があります。管理者に連絡してください。"
+            else:
+                if attempt < max_retries - 1:
+                    wait_time = delay * (attempt + 1)
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    return f"予期しないエラーが発生しました: {error_msg[:100]}..."
+                    
+    return "複数回の試行後もAPIに接続できませんでした。しばらく待ってから再度お試しください。"
+
+# 学習単元のデータ
+UNITS = [
+    "金属のあたたまり方",
+    "水のあたたまり方",
+    "空気の温度と体積",
+    "水を冷やし続けた時の温度と様子"
+]
+
+# 課題文を読み込む関数
+def load_task_content(unit_name):
+    try:
+        with open(f'tasks/{unit_name}.txt', 'r', encoding='utf-8') as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return f"{unit_name}について実験を行います。どのような結果になると予想しますか？"
+
+INITIAL_MESSAGES_FILE = PROMPTS_DIR / 'initial_messages.json'
+
+@lru_cache(maxsize=1)
+def _load_initial_messages():
+    try:
+        with open(INITIAL_MESSAGES_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"[INIT_MSG] Warning: {INITIAL_MESSAGES_FILE} not found.")
+        return {}
+    except json.JSONDecodeError as e:
+        print(f"[INIT_MSG] JSON decode error: {e}")
+        return {}
+
+
+def get_initial_ai_message(unit_name, stage='prediction'):
+    """初期メッセージを取得する"""
+    messages = _load_initial_messages()
+    stage_messages = messages.get(stage, {})
+    message = stage_messages.get(unit_name)
+    
+    if not message:
+        default_template = stage_messages.get('_default')
+        if default_template:
+            message = default_template.replace('{{unit}}', unit_name)
+    
+    if not message:
+        if stage == 'prediction':
+            message = f"{unit_name}について、どう思う？"
+        elif stage == 'reflection':
+            message = "実験でどんな結果になった？"
+        else:
+            message = "あなたの考えを聞かせてください。"
+    
+    return message
+
+# 単元ごとのプロンプトを読み込む関数
+def load_unit_prompt(unit_name):
+    """単元専用のプロンプトファイルを読み込む"""
+    try:
+        prompt_path = PROMPTS_DIR / f"{unit_name}.md"
+        with open(prompt_path, 'r', encoding='utf-8') as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return "児童の発言をよく聞いて、適切な質問で考えを引き出してください。"
+
+def load_prompt_template(filename):
+    """汎用テンプレートを読み込み"""
+    try:
+        template_path = PROMPTS_DIR / filename
+        with open(template_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        print(f"[PROMPTS] Warning: template '{filename}' not found")
+        return ""
+
+def render_prompt_template(template: str, **placeholders):
+    """テンプレート内の{{KEY}}を置換"""
+    rendered = template
+    for key, value in placeholders.items():
+        rendered = rendered.replace(f"{{{{{key}}}}}", str(value) if value is not None else "")
+    return rendered
+
+
+# 学習ログを保存する関数
+def save_learning_log(student_number, unit, log_type, data, class_number=None):
+    """学習ログをGCSまたはローカルJSONに保存
+    
+    Args:
+        student_number: 生徒番号 (例: "4103"=1組3番, "5015"=研究室15番) または出席番号
+        unit: 単元名
+        log_type: ログタイプ
+        data: ログデータ
+        class_number: クラス番号 (例: "1", "2") - 省略時は student_number から自動解析
+    """
+    class_number = normalize_class_value(class_number) or class_number
+    # parse_student_info を使って正しくパースする
+    parsed_info = parse_student_info(student_number)
+    
+    if parsed_info:
+        # 生徒番号から自動解析できた場合
+        class_num = parsed_info['class_num']
+        seat_num = parsed_info['seat_num']
+        class_display = parsed_info['display']
+    else:
+        # 従来の方法（class_numberから）
+        try:
+            class_num = int(class_number) if class_number else None
+            seat_num = int(student_number) if student_number else None
+            if class_num and seat_num:
+                class_display = f'{class_num}組{seat_num}番'
+            else:
+                class_display = str(student_number)
+        except (ValueError, TypeError):
+            class_num = None
+            seat_num = None
+            class_display = str(student_number)
+    
+    log_entry = {
+        'timestamp': datetime.now().isoformat(),
+        'student_number': student_number,
+        'class_num': class_num,
+        'seat_num': seat_num,
+        'class_display': class_display,
+        'unit': unit,
+        'log_type': log_type,
+        'data': data
+    }
+    
+    if USE_GCS:
+        # GCS に保存
+        try:
+            log_date = datetime.now().strftime('%Y%m%d')
+            log_filename = f"logs/learning_log_{log_date}.json"
+            
+            print(f"[GCS_SAVE] START - path: {log_filename}, class: {class_display}, unit: {unit}, type: {log_type}")
+            
+            # GCS からファイルを読み込み
+            blob = bucket.blob(log_filename)
+            logs = []
+            try:
+                content = blob.download_as_string()
+                logs = json.loads(content.decode('utf-8'))
+            except Exception:
+                logs = []
+            
+            # ログエントリを追加
+            logs.append(log_entry)
+            
+            # GCS に保存
+            blob.upload_from_string(
+                json.dumps(logs, ensure_ascii=False, indent=2).encode('utf-8'),
+                content_type='application/json'
+            )
+            print(f"[GCS_SAVE] SUCCESS - saved to GCS")
+        except Exception as e:
+            print(f"[GCS_SAVE] ERROR - {type(e).__name__}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    else:
+        # ローカルファイルに保存
+        log_filename = f"learning_log_{datetime.now().strftime('%Y%m%d')}.json"
+        os.makedirs('logs', exist_ok=True)
+        log_file = f"logs/{log_filename}"
+        
+        logs = []
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, 'r', encoding='utf-8') as f:
+                    logs = json.load(f)
+            except (json.JSONDecodeError, FileNotFoundError):
+                logs = []
+        
+        logs.append(log_entry)
+        
+        with open(log_file, 'w', encoding='utf-8') as f:
+            json.dump(logs, f, ensure_ascii=False, indent=2)
+
+# 学習ログを読み込む関数
+def load_learning_logs(date=None):
+    """指定日の学習ログを読み込み（GCSまたはローカル）"""
+    if date is None:
+        date = datetime.now().strftime('%Y%m%d')
+    
+    if USE_GCS:
+        # GCS から読み込み
+        try:
+            log_filename = f"logs/learning_log_{date}.json"
+            print(f"[GCS_LOAD] START - loading logs from: {log_filename}")
+            
+            blob = bucket.blob(log_filename)
+            try:
+                content = blob.download_as_string()
+                logs = json.loads(content.decode('utf-8'))
+                log_count = len(logs)
+                print(f"[GCS_LOAD] SUCCESS - loaded {log_count} logs from {date}")
+                return logs
+            except Exception as e:
+                print(f"[GCS_LOAD] File not found: {log_filename}")
+                return []
+        except Exception as e:
+            print(f"[GCS_LOAD] ERROR - {type(e).__name__}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return []
+    else:
+        # ローカルファイルから読み込み
+        log_filename = f"learning_log_{date}.json"
+        log_file = f"logs/{log_filename}"
+        
+        if not os.path.exists(log_file):
+            return []
+        
+        try:
+            with open(log_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, FileNotFoundError):
+            return []
+
+def get_available_log_dates():
+    """利用可能な全ログの日付リストを取得"""
+    import glob
+    import os
+    
+    # ローカルファイル
+    dates = []
+    log_files = glob.glob("logs/learning_log_*.json")
+    for file in log_files:
+        filename = os.path.basename(file)
+        if filename.startswith('learning_log_') and filename.endswith('.json'):
+            date_str = filename[13:-5]
+            if len(date_str) == 8 and date_str.isdigit():
+                dates.append(date_str)
+    
+    dates.sort(reverse=True)  # 新しい順
+    print(f"[DATES] Found {len(dates)} log dates: {dates[:5]}")
+    
+    return dates
+
+# エラーログ管理機能
+def save_error_log(student_number, class_number, error_message, error_type, stage, unit, additional_info=None):
+    """児童のエラーをログに記録
+    
+    Args:
+        student_number: 出席番号
+        class_number: クラス番号
+        error_message: エラーメッセージ
+        error_type: エラータイプ ('api_error', 'network_error', 'validation_error', etc)
+        stage: 学習段階 ('prediction', 'reflection', etc)
+        unit: 単元名
+        additional_info: 追加情報 (dict)
+    """
+    try:
+        normalized_class = normalize_class_value(class_number) or class_number
+        class_num = int(normalized_class) if normalized_class else None
+        seat_num = int(student_number) if student_number else None
+        class_display = f'{class_num}組{seat_num}番' if class_num and seat_num else str(student_number)
+    except (ValueError, TypeError):
+        class_display = str(student_number)
+    
+    error_entry = {
+        'timestamp': datetime.now().isoformat(),
+        'student_number': student_number,
+        'class_number': class_number,
+        'class_display': class_display,
+        'error_message': error_message,
+        'error_type': error_type,
+        'stage': stage,
+        'unit': unit,
+        'additional_info': additional_info or {}
+    }
+    
+    _save_error_log_local(error_entry)
+
+def _save_error_log_local(error_entry):
+    """エラーログをローカルファイルに保存"""
+    os.makedirs('logs', exist_ok=True)
+    error_log_file = f"logs/error_log_{datetime.now().strftime('%Y%m%d')}.json"
+    
+    logs = []
+    if os.path.exists(error_log_file):
+        try:
+            with open(error_log_file, 'r', encoding='utf-8') as f:
+                logs = json.load(f)
+        except (json.JSONDecodeError, FileNotFoundError):
+            logs = []
+    
+    logs.append(error_entry)
+    
+    with open(error_log_file, 'w', encoding='utf-8') as f:
+        json.dump(logs, f, ensure_ascii=False, indent=2)
+    
+    print(f"[ERROR_LOG] Local saved: {error_entry['class_display']}")
+
+def load_error_logs(date=None):
+    """エラーログを読み込み"""
+    if date is None:
+        date = datetime.now().strftime('%Y%m%d')
+    
+    error_log_file = f"logs/error_log_{date}.json"
+    if not os.path.exists(error_log_file):
+        return []
+    
+    try:
+        with open(error_log_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, FileNotFoundError):
+        return []
+
+def perform_clustering_analysis(unit_logs, unit_name, class_num):
+    """学生の対話をエンベディング＆クラスタリング分析
+    
+    Args:
+        unit_logs: 単元のログ一覧
+        unit_name: 単元名
+        class_num: クラス番号
+    
+    Returns:
+        dict: クラスタリング結果
+    """
+    try:
+        print(f"[CLUSTERING] Starting analysis for {class_num}_{unit_name}")
+        
+        # 予想と考察を分離
+        prediction_logs = [l for l in unit_logs if l.get('log_type') == 'prediction_chat']
+        reflection_logs = [l for l in unit_logs if l.get('log_type') == 'reflection_chat']
+        
+        clustering_results = {}
+        
+        for phase_name, phase_logs in [('予想段階', prediction_logs), ('考察段階', reflection_logs)]:
+            if not phase_logs:
+                clustering_results[phase_name] = {'clusters': [], 'message': f'{phase_name}のデータがありません'}
+                continue
+            
+            # 学生ごとに対話をグループ化
+            student_messages = {}
+            for log in phase_logs:
+                student_id = log.get('student_number', '不明')
+                msg = log.get('data', {}).get('user_message', '')
+                if msg:
+                    if student_id not in student_messages:
+                        student_messages[student_id] = []
+                    student_messages[student_id].append(msg)
+            
+            if not student_messages:
+                clustering_results[phase_name] = {'clusters': [], 'message': 'テキストデータがありません'}
+                continue
+            
+            # 各学生のテキストをまとめる
+            student_ids = list(student_messages.keys())
+            student_texts = [' '.join(student_messages[sid]) for sid in student_ids]
+            
+            print(f"[CLUSTERING] Getting embeddings for {len(student_ids)} students...")
+            
+            # OpenAI Embedding API を使用
+            client = openai.OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
+            embeddings_response = client.embeddings.create(
+                input=student_texts,
+                model="text-embedding-3-small"
+            )
+            
+            embeddings = np.array([e.embedding for e in embeddings_response.data])
+            
+            # クラスタ数を決定（学生数に基づいて、最大5クラスタ）
+            n_clusters = min(max(2, len(student_ids) // 3), 5)
+            
+            print(f"[CLUSTERING] Performing KMeans clustering with {n_clusters} clusters...")
+            
+            # クラスタリング実行
+            kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+            cluster_labels = kmeans.fit_predict(embeddings)
+            
+            # クラスタごとに学生をグループ化
+            clusters = {}
+            for i, (student_id, label) in enumerate(zip(student_ids, cluster_labels)):
+                if label not in clusters:
+                    clusters[label] = {'students': [], 'sample_texts': []}
+                clusters[label]['students'].append(student_id)
+                clusters[label]['sample_texts'].append(student_texts[i][:200])
+            
+            clustering_results[phase_name] = {
+                'clusters': [
+                    {
+                        'cluster_id': cid,
+                        'students': clusters[cid]['students'],
+                        'student_count': len(clusters[cid]['students']),
+                        'sample_text': clusters[cid]['sample_texts'][0] if clusters[cid]['sample_texts'] else ''
+                    }
+                    for cid in sorted(clusters.keys())
+                ]
+            }
+            
+            print(f"[CLUSTERING] {phase_name}: {len(clusters)} clusters created")
+        
+        return clustering_results
+    
+    except Exception as e:
+        print(f"[CLUSTERING] Error: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {
+            '予想段階': {'clusters': [], 'error': str(e)},
+            '考察段階': {'clusters': [], 'error': str(e)}
+        }
+
+def parse_student_info(student_number):
+    """生徒番号からクラスと出席番号を取得
+    
+    Args:
+        student_number: 生徒番号 (str) 例: "4103" = 4年1組3番, "5015" = 研究室5組15番
+    
+    Returns:
+        dict: {'class_num': 1, 'seat_num': 3, 'display': '1組3番'} または None
+    """
+    try:
+        if student_number == '1111':
+            return {'class_num': 0, 'seat_num': 0, 'display': 'テスト'}
+        
+        student_str = str(student_number)
+        if len(student_str) == 4:
+            prefix = student_str[0]
+            
+            # 4年生（1-4組）
+            if prefix == '4':
+                class_num = int(student_str[1])  # 2桁目がクラス番号
+                seat_num = int(student_str[2:])  # 3-4桁目が出席番号
+                return {
+                    'class_num': class_num,
+                    'seat_num': seat_num,
+                    'display': f'{class_num}組{seat_num}番'
+                }
+            
+            # 研究室（5組）
+            elif prefix == '5':
+                class_num = 5  # 研究室は5組（ログ表示は通常クラスと同様）
+                seat_num = int(student_str[1:])  # 後ろ3桁が出席番号
+                return {
+                    'class_num': class_num,
+                    'seat_num': seat_num,
+                    'display': f'{class_num}組{seat_num}番'
+                }
+        
+        return None
+    except (ValueError, TypeError):
+        return None
+
+def get_teacher_classes(teacher_id):
+    """教員IDから管理可能なクラス一覧を取得
+    
+    Args:
+        teacher_id: 教員ID
+    
+    Returns:
+        クラス名のリスト ["class1", "class2", ...]
+    """
+    return TEACHER_CLASS_MAPPING.get(teacher_id, [])
+
+@app.route('/api/test')
+def api_test():
+    """API接続テスト"""
+    try:
+        test_prompt = "こんにちは。短い挨拶をお願いします。"
+        response = call_openai_with_retry(test_prompt, max_retries=1)
+        return jsonify({
+            'status': 'success',
+            'message': 'API接続テスト成功',
+            'response': response
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'API接続テスト失敗: {str(e)}'
+        }), 500
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/select_class')
+def select_class():
+    return render_template('select_class.html')
+
+@app.route('/select_number')
+def select_number():
+    class_number = request.args.get('class', '1')
+    class_number = normalize_class_value(class_number) or '1'
+    return render_template('select_number.html', class_number=class_number)
+
+@app.route('/select_unit')
+def select_unit():
+    class_number = request.args.get('class', '1')
+    class_number = normalize_class_value(class_number) or '1'
+    student_number = request.args.get('number')
+    session['class_number'] = class_number
+    session['student_number'] = student_number
+    
+    # 同時セッション競合チェック
+    student_id = f"{class_number}_{student_number}"
+    has_conflict, previous_session_id, previous_device = check_session_conflict(student_id)
+    
+    if has_conflict:
+        # 前のセッションをクリア
+        clear_session(previous_session_id)
+        flash(f'別の端末でこのアカウントがアクセスされたため、前のセッションを終了しました。', 'warning')
+    
+    # 現在のセッションを登録（セッションIDを生成）
+    session_id = str(uuid.uuid4())
+    session['_session_id'] = session_id
+    register_session(student_id, session_id)
+    
+    # 各単元の進行状況をチェック
+    unit_progress = {}
+    for unit in UNITS:
+        progress = get_student_progress(class_number, student_number, unit)
+        needs_resumption = check_resumption_needed(class_number, student_number, unit)
+        stage_progress = progress.get('stage_progress', {})
+        
+        # 各段階の状態を取得
+        prediction_started = stage_progress.get('prediction', {}).get('started', False)
+        prediction_summary_created = stage_progress.get('prediction', {}).get('summary_created', False)
+        experiment_started = stage_progress.get('experiment', {}).get('started', False)
+        reflection_started = stage_progress.get('reflection', {}).get('started', False)
+        reflection_summary_created = stage_progress.get('reflection', {}).get('summary_created', False)
+        reflection_needs_resumption = reflection_started and stage_progress.get('reflection', {}).get('conversation_count', 0) > 0 and not reflection_summary_created
+        
+        unit_progress[unit] = {
+            'current_stage': progress['current_stage'],
+            'needs_resumption': needs_resumption,
+            'last_access': progress.get('last_access', ''),
+            'progress_summary': get_progress_summary(progress),
+            # 各段階の状態フラグを追加
+            'prediction_started': prediction_started,
+            'prediction_summary_created': prediction_summary_created,
+            'experiment_started': experiment_started,
+            'reflection_started': reflection_started,
+            'reflection_summary_created': reflection_summary_created,
+            'reflection_needs_resumption': reflection_needs_resumption
+        }
+    
+    return render_template('select_unit.html', units=UNITS, unit_progress=unit_progress)
+
+@app.route('/prediction')
+def prediction():
+    class_number = request.args.get('class', session.get('class_number', '1'))
+    class_number = normalize_class_value(class_number) or normalize_class_value(session.get('class_number')) or '1'
+    student_number = request.args.get('number', session.get('student_number', '1'))
+    unit = request.args.get('unit')
+    resume = request.args.get('resume', 'false').lower() == 'true'
+    
+    # 異なる単元に移動した場合、セッションをクリア
+    current_unit = session.get('unit')
+    if current_unit and current_unit != unit:
+        print(f"[PREDICTION] 単元変更: {current_unit} → {unit}")
+        session.pop('conversation', None)
+        session.pop('prediction_summary', None)
+        session.pop('reflection_conversation', None)
+        session.pop('reflection_summary', None)
+    
+    session['class_number'] = class_number
+    session['student_number'] = student_number
+    session['unit'] = unit
+    
+    task_content = load_task_content(unit)
+    session['task_content'] = task_content
+    
+    # 進行状況をチェック
+    progress = get_student_progress(class_number, student_number, unit)
+    stage_progress = progress.get('stage_progress', {})
+    prediction_stage = stage_progress.get('prediction', {})
+    prediction_summary_created = prediction_stage.get('summary_created', False)
+    conversation_count = prediction_stage.get('conversation_count', 0)
+    
+    # セッションに会話履歴があるか確認
+    session_conversation = session.get('conversation')
+    student_id = f"{class_number}_{student_number}"
+    
+    # 新規開始 - セッションを常に完全にリセット（本番環境でも同じ振る舞い）
+    session.clear()
+    session['class_number'] = class_number
+    session['student_number'] = student_number
+    session['unit'] = unit
+    session['task_content'] = task_content
+    session['current_stage'] = 'prediction'
+    session['conversation'] = []
+    session['prediction_summary'] = ''
+    session['prediction_summary_created'] = False
+    
+    # resume パラメータが明示的に指定されている場合のみ復帰情報を提供
+    if resume:
+        resumption_info = {
+            'is_resumption': True,
+            'last_conversation_count': conversation_count,
+            'last_access': progress.get('last_access', ''),
+            'prediction_summary_created': prediction_summary_created
+        }
+        
+        # まとめが完了している場合は保存されたまとめを復元
+        if prediction_summary_created and not session.get('prediction_summary'):
+            logs = load_learning_logs(datetime.now().strftime('%Y%m%d'))
+            for log in logs:
+                if (log.get('student_number') == student_number and 
+                    log.get('unit') == unit and 
+                    log.get('log_type') == 'prediction_summary'):
+                    session['prediction_summary'] = log.get('data', {}).get('summary', '')
+                    break
+        
+        print(f"[PREDICTION] 復帰モード: conversation_count={conversation_count}, summary_created={prediction_summary_created}")
+    else:
+        resumption_info = {
+            'is_resumption': False,
+            'prediction_summary_created': False,
+            'last_conversation_count': 0,
+            'last_access': progress.get('last_access', '')
+        }
+        
+        print(f"[PREDICTION] 新規開始モード")
+    
+    # 予想段階開始を記録
+    update_student_progress(class_number, student_number, unit)
+    
+    # 単元に応じた最初のAIメッセージを取得
+    initial_ai_message = get_initial_ai_message(unit, stage='prediction')
+    
+    # 初期メッセージを会話履歴に追加
+    conversation_history = session.get('conversation', [])
+    if not conversation_history:
+        # 新規セッション時のみ、初期メッセージを会話履歴に追加
+        conversation_history = [{'role': 'assistant', 'content': initial_ai_message}]
+        session['conversation'] = conversation_history
+    
+    return render_template('prediction.html', unit=unit, task_content=task_content, 
+                         prediction_summary_created=prediction_summary_created, 
+                         initial_ai_message=initial_ai_message,
+                         conversation_history=conversation_history)
+
+@app.route('/chat', methods=['POST'])
+def chat():
+    user_message = request.json.get('message')
+    input_metadata = request.json.get('metadata', {})
+    
+    conversation = session.get('conversation', [])
+    unit = session.get('unit')
+    task_content = session.get('task_content')
+    student_number = session.get('student_number')
+    
+    # 対話履歴に追加
+    conversation.append({'role': 'user', 'content': user_message})
+    
+    # 単元ごとのプロンプトを読み込み
+    unit_prompt = load_unit_prompt(unit)
+    
+    # 対話履歴を含めてプロンプト作成
+    # OpenAI APIに送信するためにメッセージ形式で構築
+    messages = [
+        {"role": "system", "content": unit_prompt}
+    ]
+    
+    # 対話履歴をメッセージフォーマットで追加
+    # 初期メッセージは既に conversation に含まれているので、そのまま追加
+    for msg in conversation:
+        messages.append({
+            "role": msg['role'],
+            "content": msg['content']
+        })
+    
+    try:
+        ai_response = call_openai_with_retry(messages, unit=unit, stage='prediction', enable_cache=True)
+        
+        # JSON形式のレスポンスの場合は解析して純粋なメッセージを抽出
+        ai_message = extract_message_from_json_response(ai_response)
+        
+        # 予想・考察段階ではマークダウン除去をスキップ（MDファイルのプロンプトに従う）
+        # ai_message = remove_markdown_formatting(ai_message)
+        
+        conversation.append({'role': 'assistant', 'content': ai_message})
+        session['conversation'] = conversation
+        
+        # セッションをDBに保存（ブラウザ閉鎖後の復帰対応）
+        student_id = f"{session.get('class_number')}_{session.get('student_number')}"
+        save_session_to_db(student_id, unit, 'prediction', conversation)
+        
+        # 学習ログを保存
+        save_learning_log(
+            student_number=session.get('student_number'),
+            unit=unit,
+            log_type='prediction_chat',
+            data={
+                'user_message': user_message,
+                'ai_response': ai_message
+            },
+            class_number=session.get('class_number')
+        )
+        
+        # 対話が2回以上あれば、予想のまとめを作成可能
+        # user + AI で最低2セット（2往復）= 4メッセージ以上必要
+        # ただし、実際のユーザーとの往復回数をカウント(AIの初期メッセージは除外)
+        user_messages_count = sum(1 for msg in conversation if msg['role'] == 'user')
+        suggest_summary = user_messages_count >= 2  # ユーザーメッセージが2回以上
+        
+        response_data = {
+            'response': ai_message,
+            'suggest_summary': suggest_summary
+        }
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'AI接続エラーが発生しました。しばらく待ってから再度お試しください。'}), 500
+
+@app.route('/report_error', methods=['POST'])
+def report_error():
+    """児童からのエラー報告を受け取る"""
+    try:
+        data = request.json
+        student_number = session.get('student_number')
+        class_number = session.get('class_number')
+        
+        error_message = data.get('error_message', '不明なエラー')
+        error_type = data.get('error_type', 'unknown')
+        stage = data.get('stage', session.get('current_stage', 'unknown'))
+        unit = data.get('unit', session.get('unit', ''))
+        additional_info = data.get('additional_info', {})
+        
+        print(f"[ERROR_REPORT] {class_number}_{student_number}: {error_type} - {error_message}")
+        
+        # エラーログを保存
+        save_error_log(
+            student_number=student_number,
+            class_number=class_number,
+            error_message=error_message,
+            error_type=error_type,
+            stage=stage,
+            unit=unit,
+            additional_info=additional_info
+        )
+        
+        return jsonify({'status': 'success', 'message': 'エラー報告を受け取りました'}), 200
+    
+    except Exception as e:
+        print(f"[ERROR_REPORT] Error: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/summary', methods=['POST'])
+def summary():
+    conversation = session.get('conversation', [])
+    unit = session.get('unit')
+    
+    # すでに要約が作成されている場合はスキップ
+    if session.get('prediction_summary'):
+        print(f"[SUMMARY] Already created: {session.get('prediction_summary')[:50]}...")
+        return jsonify({'summary': session.get('prediction_summary')})
+    
+    # ユーザーの発言をチェック（初期メッセージを除く）
+    user_messages = [msg for msg in conversation if msg['role'] == 'user']
+    
+    # ユーザー発言が不足している場合
+    if len(user_messages) == 0:
+        return jsonify({
+            'error': 'まだ何も話していないようです。あなたの予想や考えを教えてください。',
+            'is_insufficient': True
+        }), 400
+    
+    # ユーザー発言の内容をチェック
+    user_content = ' '.join([msg['content'] for msg in user_messages])
+    
+    # 非常に短い発言のみ（有意な情報がない）
+    if len(user_content) < 10:
+        return jsonify({
+            'error': 'もっと詳しく教えてください。どう思ったのか、何かあったのか、話してみてね。',
+            'is_insufficient': True
+        }), 400
+    
+    # ユーザーの有意な発言があるかチェック（経験や理由を含むか）
+    # キーワード：経験を示す言葉
+    experience_keywords = ['あった', 'あります', '見た', '見ました', '思う', '思います', 'なった', 'になった', '〜だから', 'ため', 'ことがあ']
+    has_meaningful_content = any(keyword in user_content for keyword in experience_keywords)
+    
+    # 2回以上のラリーがあれば、意味がなくても頑張ってまとめる
+    exchange_count = len(user_messages)
+    
+    if not has_meaningful_content and exchange_count < 2:
+        return jsonify({
+            'error': 'あなたの考えが伝わりきっていないようです。どういうわけでそう思ったの？何か見たことや経験があれば教えてね。',
+            'is_insufficient': True
+        }), 400
+    
+    # 単元のプロンプトを読み込み（要約の指示は既にプロンプトファイルに含まれている）
+    unit_prompt = load_unit_prompt(unit)
+    
+    # メッセージフォーマットで構築
+    messages = [
+        {"role": "system", "content": unit_prompt + "\n\n【重要】以下の会話内容のみをもとに、児童の話した言葉や順序を活かして、予想をまとめてください。会話に含まれていない内容は追加しないでください。"}
+    ]
+    
+    # 対話履歴をメッセージフォーマットで追加
+    for msg in conversation:
+        messages.append({
+            "role": msg['role'],
+            "content": msg['content']
+        })
+    
+    # 最後に要約を促すメッセージを追加
+    messages.append({
+        "role": "user",
+        "content": "これまでの話をもとに、予想をまとめてください。児童の話した順序と言葉を活かし、口語を自然な書き言葉に整えてください。会話に含まれていない内容は追加しないでください。"
+    })
+    
+    try:
+        summary_response = call_openai_with_retry(messages, model_override="gpt-4o-mini", enable_cache=True)
+        
+        # JSON形式のレスポンスの場合は解析して純粋なメッセージを抽出
+        summary_text = extract_message_from_json_response(summary_response)
+        
+        # セッションに保存してから、フラグとログを更新
+        session['prediction_summary'] = summary_text
+        session.modified = True
+        
+        # 予想まとめを永続ストレージに保存（セッション切れ対策）
+        class_number = session.get('class_number')
+        student_number = session.get('student_number')
+        student_id = f"{class_number}_{student_number}"
+        _save_summary_to_db(student_id, unit, 'prediction', summary_text)
+        
+        print(f"[SUMMARY] Created and saved: {summary_text[:50]}...")
+        
+        # 予想完了フラグを設定
+        update_student_progress(
+            class_number=class_number,
+            student_number=student_number,
+            unit=unit,
+            prediction_summary_created=True
+        )
+        
+        # 予想まとめのログを保存
+        save_learning_log(
+            student_number=student_number,
+            unit=unit,
+            log_type='prediction_summary',
+            data={
+                'summary': summary_text,
+                'conversation': conversation
+            },
+            class_number=class_number
+        )
+        
+        return jsonify({'summary': summary_text})
+    except Exception as e:
+        return jsonify({'error': f'まとめ生成中にエラーが発生しました。'}), 500
+
+@app.route('/api/sync-session', methods=['POST'])
+def sync_session():
+    """クライアント側のlocalStorageデータをサーバーに同期（GCS/ローカル保存）"""
+    try:
+        data = request.get_json()
+        student_id = data.get('student_id')
+        unit = data.get('unit')
+        stage = data.get('stage')  # 'prediction' or 'reflection'
+        chat_messages = data.get('chat_messages', [])
+        summary_content = data.get('summary_content', '')
+        
+        if not all([student_id, unit, stage]):
+            return jsonify({'error': '必須パラメータが不足しています'}), 400
+        
+        # セッションデータを構成
+        conversation_data = chat_messages
+        
+        # サーバー側にセッションを保存（GCS/ローカル）
+        save_session_to_db(student_id, unit, stage, conversation_data)
+        
+        # サマリーも保存したい場合は別途保存
+        if summary_content:
+            summary_entry = {
+                'timestamp': datetime.now().isoformat(),
+                'student_id': student_id,
+                'unit': unit,
+                'stage': stage,
+                'summary': summary_content
+            }
+            _save_summary_to_db(summary_entry)
+        
+        print(f"[SYNC] Session synced - {student_id}_{unit}_{stage}")
+        return jsonify({
+            'success': True,
+            'message': 'セッションをサーバーに同期しました'
+        })
+    
+    except Exception as e:
+        print(f"[SYNC] Error: {e}")
+        return jsonify({
+            'error': 'セッションの同期に失敗しました',
+            'details': str(e)
+        }), 500
+
+def _save_summary_to_db(summary_entry):
+    """サマリーをデータベースに保存（GCS/ローカルハイブリッド）"""
+    try:
+        # ローカルに保存
+        _save_summary_local(summary_entry)
+        
+        # GCSに保存
+        if USE_GCS and bucket:
+            _save_summary_gcs(summary_entry)
+    except Exception as e:
+        print(f"[SUMMARY_SAVE] Error: {e}")
+
+def _save_summary_local(summary_entry):
+    """サマリーをローカルファイルに保存"""
+    try:
+        summaries = {}
+        summary_file = 'summary_storage.json'
+        if os.path.exists(summary_file):
+            with open(summary_file, 'r', encoding='utf-8') as f:
+                summaries = json.load(f)
+        
+        student_id = summary_entry['student_id']
+        unit = summary_entry['unit']
+        stage = summary_entry['stage']
+        key = f"{student_id}_{unit}_{stage}"
+        summaries[key] = summary_entry
+        
+        with open(summary_file, 'w', encoding='utf-8') as f:
+            json.dump(summaries, f, ensure_ascii=False, indent=2)
+        print(f"[SUMMARY_SAVE] Local - {key}")
+    except Exception as e:
+        print(f"[SUMMARY_SAVE] Local Error: {e}")
+
+def _save_summary_gcs(summary_entry):
+    """サマリーをGCSに保存"""
+    try:
+        from google.cloud import storage
+        student_id = summary_entry['student_id']
+        unit = summary_entry['unit']
+        stage = summary_entry['stage']
+        
+        # GCSのパス: summaries/{student_id}/{unit}/{stage}_summary.json
+        gcs_path = f"summaries/{student_id}/{unit}/{stage}_summary.json"
+        blob = bucket.blob(gcs_path)
+        blob.upload_from_string(
+            json.dumps(summary_entry, ensure_ascii=False, indent=2),
+            content_type='application/json'
+        )
+        print(f"[SUMMARY_SAVE] GCS - {gcs_path}")
+    except Exception as e:
+        print(f"[SUMMARY_SAVE] GCS Error: {e}")
+
+@app.route('/api/get-session', methods=['GET'])
+def get_session():
+    """サーバーからセッションデータを取得（GCS/ローカル）"""
+    try:
+        student_id = request.args.get('student_id')
+        unit = request.args.get('unit')
+        stage = request.args.get('stage')  # 'prediction' or 'reflection'
+        
+        if not all([student_id, unit, stage]):
+            return jsonify({'error': '必須パラメータが不足しています'}), 400
+        
+        # サーバーからセッションを読み込み
+        conversation = load_session_from_db(student_id, unit, stage)
+        
+        # サマリーも読み込み
+        summary = _load_summary_from_db(student_id, unit, stage)
+        
+        print(f"[RETRIEVE] Session retrieved - {student_id}_{unit}_{stage}")
+        return jsonify({
+            'success': True,
+            'chat_messages': conversation,
+            'summary_content': summary
+        })
+    
+    except Exception as e:
+        print(f"[RETRIEVE] Error: {e}")
+        return jsonify({
+            'error': 'セッションの取得に失敗しました',
+            'details': str(e)
+        }), 500
+
+def _save_summary_to_db(student_id, unit, stage, summary_text):
+    """サマリーを永続ストレージに保存（GCS/ローカル）"""
+    # GCSに保存
+    if USE_GCS and bucket:
+        try:
+            _save_summary_gcs(student_id, unit, stage, summary_text)
+            print(f"[SUMMARY_SAVE] GCS saved - {student_id}_{unit}_{stage}")
+        except Exception as e:
+            print(f"[SUMMARY_SAVE] GCS save failed: {e}")
+    
+    # ローカルにも保存
+    try:
+        _save_summary_local(student_id, unit, stage, summary_text)
+        print(f"[SUMMARY_SAVE] Local saved - {student_id}_{unit}_{stage}")
+    except Exception as e:
+        print(f"[SUMMARY_SAVE] Local save failed: {e}")
+
+def _save_summary_local(student_id, unit, stage, summary_text):
+    """サマリーをローカルファイルに保存"""
+    try:
+        summary_file = 'summary_storage.json'
+        
+        # 既存のファイルを読み込む
+        if os.path.exists(summary_file):
+            with open(summary_file, 'r', encoding='utf-8') as f:
+                summaries = json.load(f)
+        else:
+            summaries = {}
+        
+        # キーを作成
+        key = f"{student_id}_{unit}_{stage}"
+        
+        # 新しいサマリーを追加
+        summaries[key] = {
+            'summary': summary_text,
+            'saved_at': datetime.now().isoformat(),
+            'student_id': student_id,
+            'unit': unit,
+            'stage': stage
+        }
+        
+        # ファイルに保存
+        with open(summary_file, 'w', encoding='utf-8') as f:
+            json.dump(summaries, f, ensure_ascii=False, indent=2)
+        
+        print(f"[SUMMARY_SAVE_LOCAL] {key} saved to {summary_file}")
+    except Exception as e:
+        print(f"[SUMMARY_SAVE_LOCAL] Error: {e}")
+
+def _save_summary_gcs(student_id, unit, stage, summary_text):
+    """サマリーをGCSに保存"""
+    try:
+        from google.cloud import storage
+        
+        # GCSのパス: summaries/{student_id}/{unit}/{stage}_summary.json
+        gcs_path = f"summaries/{student_id}/{unit}/{stage}_summary.json"
+        blob = bucket.blob(gcs_path)
+        
+        data = {
+            'summary': summary_text,
+            'saved_at': datetime.now().isoformat(),
+            'student_id': student_id,
+            'unit': unit,
+            'stage': stage
+        }
+        
+        blob.upload_from_string(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            content_type='application/json'
+        )
+        
+        print(f"[SUMMARY_SAVE_GCS] {gcs_path} saved")
+    except Exception as e:
+        print(f"[SUMMARY_SAVE_GCS] Error: {e}")
+
+def _load_summary_from_db(student_id, unit, stage):
+    """サマリーをデータベースから取得（GCS/ローカル）"""
+    # GCSから取得
+    if USE_GCS and bucket:
+        summary = _load_summary_gcs(student_id, unit, stage)
+        if summary is not None:
+            return summary
+    
+    # ローカルから取得
+    return _load_summary_local(student_id, unit, stage)
+
+def _load_summary_local(student_id, unit, stage):
+    """サマリーをローカルファイルから取得"""
+    try:
+        summary_file = 'summary_storage.json'
+        if not os.path.exists(summary_file):
+            return ''
+        
+        with open(summary_file, 'r', encoding='utf-8') as f:
+            summaries = json.load(f)
+        
+        key = f"{student_id}_{unit}_{stage}"
+        if key in summaries:
+            print(f"[SUMMARY_LOAD] Local - {key}")
+            return summaries[key].get('summary', '')
+    except Exception as e:
+        print(f"[SUMMARY_LOAD] Local Error: {e}")
+    
+    return ''
+
+def _load_summary_gcs(student_id, unit, stage):
+    """サマリーをGCSから取得"""
+    try:
+        from google.cloud import storage
+        
+        # GCSのパス: summaries/{student_id}/{unit}/{stage}_summary.json
+        gcs_path = f"summaries/{student_id}/{unit}/{stage}_summary.json"
+        blob = bucket.blob(gcs_path)
+        
+        if blob.exists():
+            content = blob.download_as_string().decode('utf-8')
+            data = json.loads(content)
+            print(f"[SUMMARY_LOAD] GCS - {gcs_path}")
+            return data.get('summary', '')
+    except Exception as e:
+        print(f"[SUMMARY_LOAD] GCS Error: {e}")
+    
+    return None
+
+@app.route('/reflection')
+
+def reflection():
+    unit = request.args.get('unit', session.get('unit'))
+    class_number = normalize_class_value(session.get('class_number', '1')) or '1'
+    student_number = session.get('student_number')
+    session['class_number'] = class_number
+    prediction_summary = session.get('prediction_summary')
+    resume = request.args.get('resume', 'false').lower() == 'true'
+    
+    print(f"[REFLECTION] アクセス: unit={unit}, student={class_number}_{student_number}, resume={resume}")
+    
+    # 進行状況をチェック
+    progress = get_student_progress(class_number, student_number, unit)
+    stage_progress = progress.get('stage_progress', {})
+    prediction_stage = stage_progress.get('prediction', {})
+    prediction_summary_created = prediction_stage.get('summary_created', False)
+    
+    # 予想が完了していない場合はアクセス拒否
+    if not prediction_summary_created and not resume:
+        print(f"[REFLECTION] 予想未完了のため考察へのアクセスを拒否")
+        flash('考察に進む前に、予想を完了してください。', 'warning')
+        return redirect(url_for('select_unit', class_number=class_number, student_number=student_number))
+    
+    # 異なる単元に移動した場合、セッションをクリア（単元混在防止）
+    current_unit = session.get('unit')
+    if current_unit and current_unit != unit:
+        print(f"[REFLECTION] 単元変更: {current_unit} → {unit}")
+        session.pop('reflection_conversation', None)
+        session.pop('reflection_summary', None)
+        session.pop('conversation', None)
+        session.pop('prediction_summary', None)
+    
+    session['unit'] = unit
+    
+    # 進行状況をチェック
+    reflection_stage = stage_progress.get('reflection', {})
+    reflection_summary_created = reflection_stage.get('summary_created', False)
+    reflection_conversation_count = reflection_stage.get('conversation_count', 0)
+    
+    # セッションに会話履歴があるか確認
+    session_reflection_conversation = session.get('reflection_conversation')
+    student_id = f"{class_number}_{student_number}"
+
+    # 予想まとめがセッションに存在しない場合はストレージから復元
+    if (not prediction_summary) and unit and student_number:
+        restored_prediction_summary = _load_summary_from_db(student_id, unit, 'prediction')
+        if restored_prediction_summary:
+            prediction_summary = restored_prediction_summary
+            session['prediction_summary'] = restored_prediction_summary
+            print(f"[REFLECTION] 予想まとめをストレージから復元: {len(restored_prediction_summary)} 文字")
+    
+    # resume パラメータが明示的に指定されている場合のみ復元
+    if resume:
+        # 復元: セッション → DB保存 → ローカルログ
+        if not session_reflection_conversation:
+            db_reflection_conversation = load_session_from_db(student_id, unit, 'reflection')
+            if db_reflection_conversation:
+                session['reflection_conversation'] = db_reflection_conversation
+                session_reflection_conversation = db_reflection_conversation
+                print(f"[REFLECTION] DB から会話を復元: {len(db_reflection_conversation)} メッセージ")
+        
+        if not session_reflection_conversation and reflection_conversation_count > 0:
+            session['reflection_conversation'] = progress.get('reflection_conversation_history', [])
+            session_reflection_conversation = session['reflection_conversation']
+        
+        print(f"[REFLECTION] 復帰情報: 会話数={len(session.get('reflection_conversation', []))}, 復帰=True")
+        if session.get('reflection_conversation'):
+            first_msg = session['reflection_conversation'][0] if session['reflection_conversation'] else None
+            print(f"[REFLECTION] 最初のメッセージ: {first_msg['role'] if first_msg else 'N/A'}")
+        
+        resumption_info = {
+            'is_resumption': True,
+            'last_conversation_count': reflection_conversation_count,
+            'last_access': progress.get('last_access', ''),
+            'reflection_summary_created': reflection_summary_created
+        }
+        
+        # まとめが完了している場合は保存されたまとめを復元
+        if reflection_summary_created and not session.get('reflection_summary'):
+            logs = load_learning_logs(datetime.now().strftime('%Y%m%d'))
+            for log in logs:
+                if (log.get('student_number') == student_number and 
+                    log.get('unit') == unit and 
+                    log.get('log_type') == 'final_summary'):
+                    session['reflection_summary'] = log.get('data', {}).get('summary', '')
+                    break
+    else:
+        # 新規開始 - セッションをクリア
+        session.pop('reflection_conversation', None)
+        session.pop('reflection_summary', None)
+    # 新規開始 - セッション完全リセット（本番環境でも同じ振る舞い）
+    session.pop('reflection_conversation', None)
+    session.pop('reflection_summary', None)
+    session.pop('reflection_summary_created', None)
+    session['reflection_conversation'] = []
+    
+    # resume パラメータが明示的に指定されている場合のみ復帰情報を提供
+    if resume:
+        resumption_info = {
+            'is_resumption': True,
+            'last_conversation_count': reflection_conversation_count,
+            'last_access': progress.get('last_access', ''),
+            'reflection_summary_created': reflection_summary_created
+        }
+        
+        # まとめが完了している場合は保存されたまとめを復元
+        if reflection_summary_created and not session.get('reflection_summary'):
+            logs = load_learning_logs(datetime.now().strftime('%Y%m%d'))
+            for log in logs:
+                if (log.get('student_number') == student_number and 
+                    log.get('unit') == unit and 
+                    log.get('log_type') == 'final_summary'):
+                    session['reflection_summary'] = log.get('data', {}).get('summary', '')
+                    break
+        
+        print(f"[REFLECTION] 復帰モード: conversation_count={reflection_conversation_count}, summary_created={reflection_summary_created}")
+    else:
+        resumption_info = {
+            'is_resumption': False,
+            'reflection_summary_created': False,
+            'last_conversation_count': 0,
+            'last_access': progress.get('last_access', '')
+        }
+        
+        print(f"[REFLECTION] 新規開始モード")
+    
+    if unit and student_number:
+        # 考察段階開始を記録（フラグは修正しない）
+        update_student_progress(
+            class_number,
+            student_number,
+            unit
+        )
+    
+    # 単元に応じた最初のAIメッセージを取得
+    initial_ai_message = get_initial_ai_message(unit, stage='reflection')
+    
+    # セッションデータをテンプレートに明示的に渡す
+    reflection_conversation_history = session.get('reflection_conversation', [])
+    
+    return render_template('reflection.html', 
+                         unit=unit,
+                         prediction_summary=prediction_summary,
+                         reflection_summary_created=reflection_summary_created,
+                         initial_ai_message=initial_ai_message,
+                         reflection_conversation_history=reflection_conversation_history,
+                         reflection_resumption_info=resumption_info)
+
+@app.route('/reflect_chat', methods=['POST'])
+def reflect_chat():
+    user_message = request.json.get('message')
+    reflection_conversation = session.get('reflection_conversation', [])
+    unit = session.get('unit')
+    prediction_summary = session.get('prediction_summary', '')
+    
+    # 反省対話履歴に追加
+    reflection_conversation.append({'role': 'user', 'content': user_message})
+    
+    # プロンプトファイルからベースプロンプトを取得
+    unit_prompt = load_unit_prompt(unit)
+    
+    # 考察段階のシステムプロンプトを構築
+    reflection_system_prompt = f"""
+あなたは小学4年生の理科学習を支援するAIアシスタントです。現在、児童が実験後の「考察段階」に入っています。
+
+## 重要な役割
+児童は実験を終え、その結果と自分の予想を比較しながら、「なぜそうなったのか」，日常生活や既習事項との関連を自分の言葉で考える段階です。
+
+## あなたが守ること（絶対ルール）
+1. **子どもの発言を最優先する**
+   - 子どもの話した内容をそのまま受け止める
+   - 「〜なんだね」「〜だったんだね」と整理する
+   - 子どもの表現を活かす
+
+2. **自然で短い対話を心がける**
+   - 1往復ごとに1つの応答を返す
+   - 一度に3つ以上の質問をしない
+   - やさしく、短く、日常的な言葉を使う
+
+3. **絶対にしてはいけないこと**
+   - 長文のまとめを途中で出さない
+   - 難しい専門用語を使わない
+   - 子どもの考えを否定しない
+   - 要約を勝手に出さない（子どもが「まとめボタン」を押すまで）
+
+## 対話の進め方
+1. 実験結果を聞く：「じっけんではどんなけっかになった？」
+2. 予想との簡単な確認：「さいしょの予そうと同じだった？」
+3. 子どもの考え・気づきを引き出す（ここが最重要）：「それってなぜだと思う？」「何か気づいたことってある？」
+4. 体験や観察の詳しさを引き出す：「そのときどんなようすだった？」
+5. 日常との結びつけ：「ふだんでも同じようなことってある？」
+
+## 単元の指導内容
+{unit_prompt}
+
+## 児童の予想
+{prediction_summary or '予想がまだ記録されていません。'}
+
+## 大事なこと
+- 子どもが何を考えたか、気づいたかを最優先に引き出す
+- 膜の変化（ふくらむ / 凹む）から体積の変化（大きくなる / 小さくなる）を自然に導く
+- 予想との比較は簡単な確認程度
+"""
+    
+    # メッセージフォーマットで対話履歴を構築
+    messages = [
+        {"role": "system", "content": reflection_system_prompt}
+    ]
+    
+    # 対話履歴をメッセージフォーマットで追加
+    for msg in reflection_conversation:
+        messages.append({
+            "role": msg['role'],
+            "content": msg['content']
+        })
+    
+    try:
+        ai_response = call_openai_with_retry(messages, unit=unit, stage='reflection', enable_cache=True)
+        
+        # JSON形式のレスポンスの場合は解析して純粋なメッセージを抽出
+        ai_message = extract_message_from_json_response(ai_response)
+        
+        # 予想・考察段階ではマークダウン除去をスキップ（MDファイルのプロンプトに従う）
+        # ai_message = remove_markdown_formatting(ai_message)
+        
+        reflection_conversation.append({'role': 'assistant', 'content': ai_message})
+        session['reflection_conversation'] = reflection_conversation
+        
+        # セッションをDBに保存（ブラウザ閉鎖後の復帰対応）
+        student_id = f"{session.get('class_number')}_{session.get('student_number')}"
+        save_session_to_db(student_id, unit, 'reflection', reflection_conversation)
+        
+        # 考察チャットのログを保存
+        save_learning_log(
+            student_number=session.get('student_number'),
+            unit=unit,
+            log_type='reflection_chat',
+            data={
+                'user_message': user_message,
+                'ai_response': ai_message
+            },
+            class_number=session.get('class_number')
+        )
+        
+        # 対話が2往復以上あれば、考察のまとめを作成可能
+        # ユーザーメッセージが2回以上必要
+        user_messages_count = sum(1 for msg in reflection_conversation if msg['role'] == 'user')
+        suggest_final_summary = user_messages_count >= 2
+        
+        return jsonify({
+            'response': ai_message,
+            'suggest_final_summary': suggest_final_summary
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'AI接続エラーが発生しました。しばらく待ってから再度お試しください。'}), 500
+
+@app.route('/final_summary', methods=['POST'])
+def final_summary():
+    reflection_conversation = session.get('reflection_conversation', [])
+    prediction_summary = session.get('prediction_summary', '')
+    unit = session.get('unit')
+    
+    # ユーザーの発言をチェック（初期メッセージを除く）
+    user_messages = [msg for msg in reflection_conversation if msg['role'] == 'user']
+    
+    # ユーザー発言が不足している場合
+    if len(user_messages) == 0:
+        return jsonify({
+            'error': 'まだ何も話していないようです。実験の結果や気づきを教えてください。',
+            'is_insufficient': True
+        }), 400
+    
+    # ユーザー発言の内容をチェック
+    user_content = ' '.join([msg['content'] for msg in user_messages])
+    
+    # 非常に短い発言のみ（有意な情報がない）
+    if len(user_content) < 10:
+        return jsonify({
+            'error': 'もっと詳しく教えてください。実験ではどんなことが起きた？どう思った？',
+            'is_insufficient': True
+        }), 400
+    
+    # ユーザーの有意な発言があるかチェック（観察や気づきを含むか）
+    # キーワード：観察や変化を示す言葉
+    experience_keywords = ['なった', 'になった', '見た', '見ました', '変わ', 'できた', '思う', '思います', 'だから', 'ため', 'ことがあ']
+    has_meaningful_content = any(keyword in user_content for keyword in experience_keywords)
+    
+    # 2回以上のラリーがあれば、意味がなくても頑張ってまとめる
+    exchange_count = len(user_messages)
+    
+    if not has_meaningful_content and exchange_count < 2:
+        return jsonify({
+            'error': 'あなたの考えが伝わりきっていないようです。どんな結果になった？予想と同じだった？ちがった？',
+            'is_insufficient': True
+        }), 400
+    
+    # 単元のプロンプトを読み込み（考察の指示は既にプロンプトファイルに含まれている）
+    unit_prompt = load_unit_prompt(unit)
+    
+    # メッセージフォーマットで構築
+    messages = [
+        {"role": "system", "content": unit_prompt + "\n\n【重要】以下の会話内容のみをもとに、児童の話した言葉や考えを活かして、考察をまとめてください。会話に含まれていない内容は追加しないでください。"}
+    ]
+    
+    # 対話履歴をメッセージフォーマットで追加
+    for msg in reflection_conversation:
+        messages.append({
+            "role": msg['role'],
+            "content": msg['content']
+        })
+    
+    # 最後に考察作成を促すメッセージを追加
+    messages.append({
+        "role": "user",
+        "content": f"""これまでの話と以下の予想をもとに、考察をまとめてください。児童の思考過程と対話内容を尊重しながら、文章で表現してください。会話に含まれていない内容は追加しないでください。
+
+【作成した予想】
+{prediction_summary}"""
+    })
+    
+    try:
+        final_summary_response = call_openai_with_retry(messages, model_override="gpt-4o-mini", enable_cache=True)
+        
+        # JSON形式のレスポンスの場合は解析して純粋なメッセージを抽出
+        final_summary_text = extract_message_from_json_response(final_summary_response)
+        
+        # 要約段階ではマークダウン除去をスキップ（MDファイルのプロンプトに従う）
+        # final_summary_text = remove_markdown_formatting(final_summary_text)
+        
+        # 考察完了フラグを設定
+        update_student_progress(
+            class_number=session.get('class_number'),
+            student_number=session.get('student_number'),
+            unit=session.get('unit'),
+            reflection_summary_created=True
+        )
+        
+        # 最終考察のログを保存
+        save_learning_log(
+            student_number=session.get('student_number'),
+            unit=session.get('unit'),
+            log_type='final_summary',
+            data={
+                'final_summary': final_summary_text,
+                'prediction_summary': prediction_summary,
+                'reflection_conversation': reflection_conversation
+            },
+            class_number=session.get('class_number')
+        )
+        
+        return jsonify({'summary': final_summary_text})
+    except Exception as e:
+        return jsonify({'error': f'最終まとめ生成中にエラーが発生しました。'}), 500
+
+@app.route('/get_prediction_summary', methods=['GET'])
+def get_prediction_summary():
+    """復帰時に予想のまとめを取得するエンドポイント"""
+    unit = session.get('unit')
+    student_number = session.get('student_number')
+    
+    if not unit or not student_number:
+        return jsonify({'summary': None}), 400
+    
+    # セッションに保存されている予想のまとめを返す
+    summary = session.get('prediction_summary')
+    if summary:
+        return jsonify({'summary': summary})
+    
+    # セッションにない場合は学習ログから取得を試みる
+    logs = load_learning_logs(datetime.now().strftime('%Y%m%d'))
+    for log in logs:
+        if (log.get('student_number') == student_number and 
+            log.get('unit') == unit and 
+            log.get('log_type') == 'prediction_summary'):
+            session['prediction_summary'] = log.get('data', {}).get('summary', '')
+            return jsonify({'summary': log.get('data', {}).get('summary', '')})
+    
+    return jsonify({'summary': None})
+
+# 教員用ルート
+@app.route('/teacher/login', methods=['GET', 'POST'])
+def teacher_login():
+    """教員ログインページ"""
+    if request.method == 'POST':
+        teacher_id = request.form.get('teacher_id')
+        password = request.form.get('password')
+        
+        # 認証チェック
+        if teacher_id in TEACHER_CREDENTIALS and TEACHER_CREDENTIALS[teacher_id] == password:
+            session['teacher_authenticated'] = True
+            session['teacher_id'] = teacher_id
+            return redirect(url_for('teacher'))
+        else:
+            flash('IDまたはパスワードが正しくありません', 'error')
+    
+    return render_template('teacher/login.html')
+
+@app.route('/teacher/logout')
+def teacher_logout():
+    """教員ログアウト"""
+    session.pop('teacher_authenticated', None)
+    session.pop('teacher_id', None)
+    return redirect(url_for('index'))
+
+@app.route('/teacher')
+@require_teacher_auth
+def teacher():
+    """教員用ダッシュボード"""
+    teacher_id = session.get('teacher_id')
+    
+    return render_template('teacher/dashboard.html', 
+                         units=UNITS, 
+                         teacher_id=teacher_id)
+
+@app.route('/teacher/dashboard')
+@require_teacher_auth
+def teacher_dashboard():
+    """教員用ダッシュボード（別ルート）"""
+    teacher_id = session.get('teacher_id')
+    
+    return render_template('teacher/dashboard.html', 
+                         units=UNITS, 
+                         teacher_id=teacher_id)
+
+@app.route('/teacher/logs')
+@require_teacher_auth
+def teacher_logs():
+    """学習ログ一覧"""
+    # デフォルト日付を現在の日付に設定
+    try:
+        available_dates_raw = get_available_log_dates()
+        default_date = available_dates_raw[0] if available_dates_raw else datetime.now().strftime('%Y%m%d')
+        # フロントエンド用に辞書形式に変換
+        available_dates = [
+            {'raw': d, 'formatted': f"{d[:4]}/{d[4:6]}/{d[6:8]}"}
+            for d in available_dates_raw
+        ]
+    except Exception as e:
+        print(f"[LOGS] Error getting available dates: {str(e)}")
+        default_date = datetime.now().strftime('%Y%m%d')
+        available_dates = []
+    
+    date = request.args.get('date', default_date)
+    unit = request.args.get('unit', '')
+    raw_class_filter = request.args.get('class', '')
+    class_filter = normalize_class_value(raw_class_filter) or ''
+    class_filter_int = None
+    if class_filter:
+        try:
+            class_filter_int = int(class_filter)
+        except ValueError:
+            class_filter_int = None
+    student = request.args.get('student', '')
+    
+    logs = load_learning_logs(date)
+    
+    # フィルタリング
+    if unit:
+        logs = [log for log in logs if log.get('unit') == unit]
+    
+    # クラスと出席番号でフィルター（両方を組み合わせる）
+    if class_filter_int is not None and student:
+        # クラスと出席番号の両方が指定された場合
+        logs = [log for log in logs 
+                if log.get('class_num') == class_filter_int 
+                and log.get('seat_num') == int(student)]
+    elif class_filter_int is not None:
+        # クラスのみ指定された場合
+        logs = [log for log in logs 
+                if log.get('class_num') == class_filter_int]
+    elif student:
+        # 出席番号のみ指定された場合（全クラスから該当番号を検索）
+        logs = [log for log in logs 
+                if log.get('seat_num') == int(student)]
+    
+    # 学生ごとにグループ化（クラスと出席番号の組み合わせで識別）
+    students_data = {}
+    for log in logs:
+        class_num = log.get('class_num')
+        seat_num = log.get('seat_num')
+        student_num = log.get('student_number')
+        
+        # クラスと出席番号の組み合わせで一意のキーを生成
+        student_key = f"{class_num}_{seat_num}" if class_num and seat_num else student_num
+        
+        if student_key not in students_data:
+            # ログから直接クラスと出席番号の情報を取得
+            if class_num is not None and seat_num is not None:
+                display_label = f'{class_num}組{seat_num}番'
+            else:
+                display_label = log.get('class_display', str(student_num))
+            student_info = {
+                'class_num': class_num,
+                'seat_num': seat_num,
+                'display': display_label
+            }
+            students_data[student_key] = {
+                'student_number': student_num,
+                'student_info': student_info,
+                'units': {}
+            }
+        
+        unit_name = log.get('unit')
+        if unit_name not in students_data[student_key]['units']:
+            students_data[student_key]['units'][unit_name] = {
+                'prediction_chats': [],
+                'prediction_summary': None,
+                'reflection_chats': [],
+                'final_summary': None
+            }
+        
+        log_type = log.get('log_type')
+        if log_type == 'prediction_chat':
+            students_data[student_key]['units'][unit_name]['prediction_chats'].append(log)
+        elif log_type == 'prediction_summary':
+            students_data[student_key]['units'][unit_name]['prediction_summary'] = log
+        elif log_type == 'reflection_chat':
+            students_data[student_key]['units'][unit_name]['reflection_chats'].append(log)
+        elif log_type == 'final_summary':
+            students_data[student_key]['units'][unit_name]['final_summary'] = log
+    
+    # クラスと番号でソート
+    students_data = dict(sorted(students_data.items(), 
+                                key=lambda x: (x[1]['student_info']['class_num'] if x[1]['student_info'] else 999, 
+                                             x[1]['student_info']['seat_num'] if x[1]['student_info'] else 999)))
+    
+    return render_template('teacher/logs.html', 
+                         students_data=students_data, 
+                         units=UNITS,
+                         current_date=date,
+                         current_unit=unit,
+                         current_class=class_filter,
+                         current_student=student,
+                         available_dates=available_dates,
+                         teacher_id=session.get('teacher_id'))
+
+@app.route('/teacher/export')
+@require_teacher_auth
+def teacher_export():
+    """ログをCSVでエクスポート - ダウンロード日までのすべてのログ"""
+    from io import StringIO, BytesIO
+    import csv
+    
+    download_date_str = request.args.get('date', datetime.now().strftime('%Y%m%d'))
+    
+    # ダウンロード日までのすべてのログを取得
+    all_logs = []
+    available_dates = get_available_log_dates()
+    
+    print(f"[EXPORT] START - exporting logs up to date: {download_date_str}")
+    
+    for date_str in available_dates:
+        # date_str は文字列 (YYYYMMDD format)
+        current_date_raw = date_str if isinstance(date_str, str) else date_str.get('raw', '')
+        # ダウンロード日以下の日付のみを対象
+        if current_date_raw <= download_date_str:
+            try:
+                logs = load_learning_logs(current_date_raw)
+                all_logs.extend(logs)
+                print(f"[EXPORT] Loaded {len(logs)} logs from {current_date_raw}")
+            except Exception as e:
+                print(f"[EXPORT] ERROR loading logs from {current_date_raw}: {str(e)}")
+                continue
+    
+    # CSVをメモリに作成（UTF-8 BOM付き）
+    output = StringIO()
+    fieldnames = ['timestamp', 'class_display', 'student_number', 'unit', 'log_type', 'content']
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    
+    for log in all_logs:
+        content = ""
+        if log.get('log_type') == 'prediction_chat':
+            content = f"Q: {log['data'].get('user_message', '')}\nA: {log['data'].get('ai_response', '')}"
+        elif log.get('log_type') == 'prediction_summary':
+            content = log['data'].get('summary', '')
+        elif log.get('log_type') == 'reflection_chat':
+            content = f"Q: {log['data'].get('user_message', '')}\nA: {log['data'].get('ai_response', '')}"
+        elif log.get('log_type') == 'final_summary':
+            content = log['data'].get('final_summary', '')
+        
+        writer.writerow({
+            'timestamp': log.get('timestamp', ''),
+            'class_display': log.get('class_display', ''),
+            'student_number': log.get('student_number', ''),
+            'unit': log.get('unit', ''),
+            'log_type': log.get('log_type', ''),
+            'content': content
+        })
+    
+    # StringIOをUTF-8 BOM付きバイナリにエンコード
+    csv_string = output.getvalue()
+    csv_bytes = '\ufeff'.encode('utf-8') + csv_string.encode('utf-8')  # UTF-8 BOM追加
+    
+    filename = f"all_learning_logs_up_to_{download_date_str}.csv"
+    
+    print(f"[EXPORT] SUCCESS - exported {len(all_logs)} total logs, size: {len(csv_bytes)} bytes")
+    
+    return Response(
+        csv_bytes,
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"}
+    )
+
+@app.route('/teacher/export_json')
+@require_teacher_auth
+def teacher_export_json():
+    """対話内容をJSONでエクスポート - 単元ごとのディレクトリ構造でzip出力"""
+    from io import BytesIO
+    
+    download_date_str = request.args.get('date', datetime.now().strftime('%Y%m%d'))
+    
+    # ダウンロード日までのすべてのログを取得
+    all_logs = []
+    available_dates = get_available_log_dates()
+    
+    print(f"[EXPORT_JSON] START - exporting logs up to date: {download_date_str}")
+    
+    for date_str in available_dates:
+        # date_str は文字列 (YYYYMMDD format)
+        current_date_raw = date_str if isinstance(date_str, str) else date_str.get('raw', '')
+        if current_date_raw <= download_date_str:
+            try:
+                logs = load_learning_logs(current_date_raw)
+                all_logs.extend(logs)
+                print(f"[EXPORT_JSON] Loaded {len(logs)} logs from {current_date_raw}")
+            except Exception as e:
+                print(f"[EXPORT_JSON] ERROR loading logs from {current_date_raw}: {str(e)}")
+                continue
+    
+    # 児童ごと・単元ごとにグループ化
+    # 構造: {unit: {student_id: [logs]}}
+    structured_logs = {}
+    
+    for log in all_logs:
+        unit = log.get('unit', 'unknown')
+        student_id = log.get('student_number', 'unknown')
+        
+        if unit not in structured_logs:
+            structured_logs[unit] = {}
+        if student_id not in structured_logs[unit]:
+            structured_logs[unit][student_id] = []
+        
+        structured_logs[unit][student_id].append(log)
+    
+    # Zipファイルをメモリに作成
+    zip_buffer = BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        for unit in sorted(structured_logs.keys()):
+            for student_id in sorted(structured_logs[unit].keys()):
+                logs_for_student = structured_logs[unit][student_id]
+                
+                # JSON データの作成
+                json_data = {
+                    'unit': unit,
+                    'student_id': student_id,
+                    'class_display': logs_for_student[0].get('class_display', '') if logs_for_student else '',
+                    'export_date': datetime.now().isoformat(),
+                    'logs': logs_for_student
+                }
+                
+                # ファイルパス: talk/{unit}/student_{student_id}.json
+                file_path = f"talk/{unit}/student_{student_id}.json"
+                
+                # JSONファイルをzipに追加
+                json_string = json.dumps(json_data, ensure_ascii=False, indent=2)
+                zip_file.writestr(file_path, json_string.encode('utf-8'))
+    
+    zip_buffer.seek(0)
+    filename = f"dialogue_logs_up_to_{download_date_str}.zip"
+    
+    print(f"[EXPORT_JSON] SUCCESS - exported JSON with {len(all_logs)} total logs")
+    
+    return Response(
+        zip_buffer.getvalue(),
+        mimetype="application/zip",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"}
+    )
+
+@app.route('/teacher/student_detail')
+@require_teacher_auth
+def student_detail():
+    """学生の詳細ログページ"""
+    # クラスと出席番号をクエリパラメータから取得
+    class_param = request.args.get('class')
+    class_num = normalize_class_value_int(class_param)
+    seat_num = request.args.get('seat', type=int)
+    student_id = request.args.get('student')
+    unit = request.args.get('unit', '')
+    
+    # デフォルト日付を最新のログがある日付に設定
+    try:
+        available_dates_raw = get_available_log_dates()
+        default_date = available_dates_raw[0] if available_dates_raw else datetime.now().strftime('%Y%m%d')
+        # フロントエンド用に辞書形式に変換
+        available_dates = [
+            {'raw': d, 'formatted': f"{d[:4]}/{d[4:6]}/{d[6:8]}"}
+            for d in available_dates_raw
+        ]
+    except Exception as e:
+        print(f"[DETAIL] Error getting available dates: {str(e)}")
+        default_date = datetime.now().strftime('%Y%m%d')
+        available_dates = []
+    
+    selected_date = request.args.get('date', default_date)
+    
+    # 学習ログを読み込み
+    logs = load_learning_logs(selected_date)
+    
+    # 該当する学生のログを抽出（クラスと出席番号で絞り込み）
+    student_logs = []
+    if class_num and seat_num:
+        student_logs = [log for log in logs if 
+                        log.get('class_num') == class_num and 
+                        log.get('seat_num') == seat_num and 
+                        (not unit or log.get('unit') == unit)]
+    elif student_id:
+        student_logs = [log for log in logs if 
+                        str(log.get('student_number')) == str(student_id) and 
+                        (not unit or log.get('unit') == unit)]
+        if student_logs:
+            class_num = student_logs[0].get('class_num') or class_num
+            seat_num = student_logs[0].get('seat_num') or seat_num
+    else:
+        flash('クラスと出席番号が指定されていません。', 'error')
+        return redirect(url_for('teacher_logs'))
+    
+    # 学生表示名
+    if class_num and seat_num:
+        student_display = f"{class_num}組{seat_num}番"
+    elif student_id:
+        student_display = f"ID: {student_id}"
+    else:
+        student_display = "対象の学生"
+    
+    if not student_logs:
+        flash(f'{student_display}のログがありません。日付や単元を変更してお試しください。', 'warning')
+    
+    # 単元一覧を取得（フィルター用）
+    all_units = list(set([log.get('unit') for log in logs if log.get('unit')]))
+    
+    return render_template('teacher/student_detail.html',
+                         class_num=class_num,
+                         seat_num=seat_num,
+                         student_display=student_display,
+                         unit=unit,
+                         current_unit=unit,
+                         current_date=selected_date,
+                         logs=student_logs,
+                         available_dates=available_dates,
+                         units_data={unit_name: {} for unit_name in all_units},
+                         teacher_id=session.get('teacher_id', 'teacher'))
+
+
+# ===== 教師用ノート写真管理エンドポイント =====
+
+@app.route('/api/teacher/students-by-class')
+@require_teacher_auth
+def api_students_by_class():
+    """クラスごとの学生情報をJSON形式で返す"""
+    students_by_class = {}
+    
+    # learning_progress.jsonから学生情報を取得
+    if os.path.exists(LEARNING_PROGRESS_FILE):
+        try:
+            with open(LEARNING_PROGRESS_FILE, 'r', encoding='utf-8') as f:
+                progress_data = json.load(f)
+            
+            for class_num in ['1', '2', '3', '4', '5', '6']:
+                students_by_class[class_num] = []
+                
+                if f'class_{class_num}' in progress_data:
+                    class_data = progress_data[f'class_{class_num}']
+                    for student_id in sorted(class_data.keys(), key=lambda x: int(x) if x.isdigit() else 0):
+                        student_info = class_data[student_id]
+                        students_by_class[class_num].append({
+                            'number': student_id,
+                            'name': student_info.get('name', f'学生{student_id}')
+                        })
+        except Exception as e:
+            print(f"Error loading students: {e}")
+    
+    return jsonify(students_by_class)
+
+
+
+
+# ===== ノート写真ファイル配信 =====
+
+# ===== リセット機能 =====
+
+@app.route('/logs/note_photos/<path:path>')
+def serve_note_photos(path):
+    """ノート写真ファイルを配信"""
+    from flask import send_from_directory
+    try:
+        return send_from_directory(os.path.join('logs', 'note_photos'), path)
+    except Exception as e:
+        print(f"[ERROR] Failed to serve note photo: {e}")
+        return jsonify({'error': 'File not found'}), 404
+
+
+if __name__ == '__main__':
+    # 環境変数からポート番号を取得（CloudRun用）
+    port = int(os.environ.get('PORT', 5014))
+    # 本番環境ではdebug=False
+    debug_mode = os.environ.get('FLASK_ENV') != 'production'
+    app.run(host='0.0.0.0', port=port, debug=debug_mode)
