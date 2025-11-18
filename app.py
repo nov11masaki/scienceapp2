@@ -1193,6 +1193,7 @@ def prediction():
         conversation_history = [{'role': 'assistant', 'content': initial_ai_message}]
         session['conversation'] = conversation_history
     
+    prediction_summary_created = session.get('prediction_summary_created', False)
     return render_template('prediction.html', unit=unit, task_content=task_content, 
                          prediction_summary_created=prediction_summary_created, 
                          initial_ai_message=initial_ai_message,
