@@ -1655,6 +1655,7 @@ body {
     align-items: center;
     gap: 8px;
     border: 2px solid rgba(255,255,255,0.4);
+    -webkit-backdrop-filter: blur(10px);
     backdrop-filter: blur(10px);
 }
 
@@ -3200,6 +3201,7 @@ body {
     font-weight: 500;
     border-radius: 4px;
     transition: all 0.2s ease;
+    -webkit-user-select: none;
     user-select: none;
     display: flex;
     align-items: center;
@@ -3237,6 +3239,7 @@ body {
     font-weight: 600;
     color: var(--dark-color);
     cursor: pointer;
+    -webkit-user-select: none;
     user-select: none;
 }
 
@@ -3272,6 +3275,7 @@ body {
 
 .flick-key {
     touch-action: none;
+    -webkit-user-select: none;
     user-select: none;
 }
 
