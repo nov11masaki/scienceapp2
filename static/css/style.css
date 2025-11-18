@@ -413,7 +413,7 @@ body {
     border-radius: var(--border-radius);
     padding: 24px 20px;
     text-align: center;
-    cursor: pointer;
+    cursor: default;
     transition: var(--transition);
     box-shadow: var(--shadow-light);
     border: 2px solid var(--border-color);
@@ -434,17 +434,6 @@ body {
     height: 4px;
     background: var(--primary-color);
     transition: var(--transition);
-}
-
-.unit-card:hover {
-    transform: translateY(-4px);
-    border-color: var(--primary-color);
-    box-shadow: var(--shadow-medium);
-}
-
-.unit-card:hover::before {
-    height: 100%;
-    opacity: 0.08;
 }
 
 .unit-card.active {

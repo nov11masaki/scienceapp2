@@ -1,0 +1,27 @@
+{
+  "5_29": {
+    "空気の温度と体積": {
+      "current_stage": "prediction",
+      "last_access": "2025-11-18T13:04:59.670254",
+      "stage_progress": {
+        "prediction": {
+          "started": false,
+          "conversation_count": 0,
+          "summary_created": false,
+          "last_message": ""
+        },
+        "experiment": {
+          "started": false,
+          "completed": false
+        },
+        "reflection": {
+          "started": false,
+          "conversation_count": 0,
+          "summary_created": false
+        }
+      },
+      "conversation_history": [],
+      "reflection_conversation_history": []
+    }
+  }
+}
