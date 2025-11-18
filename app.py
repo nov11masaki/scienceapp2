@@ -540,9 +540,9 @@ def call_openai_with_retry(prompt, max_retries=3, delay=2, unit=None, stage=None
             # 予想段階: より創造的な回答 (0.8)
             # 考察段階: より一貫性のある回答 (0.3)
             if stage == 'prediction':
-                temperature = 0.8
+                temperature = 1.0
             elif stage == 'reflection':
-                temperature = 0.3
+                temperature = 0.8
             else:
                 temperature = 0.5  # デフォルト
             
@@ -644,10 +644,22 @@ def get_initial_ai_message(unit_name, stage='prediction'):
     return message
 
 # 単元ごとのプロンプトを読み込む関数
-def load_unit_prompt(unit_name):
-    """単元専用のプロンプトファイルを読み込む"""
+def load_unit_prompt(unit_name, stage=None):
+    """単元専用のプロンプトファイルを読み込む
+    
+    Args:
+        unit_name: 単元名
+        stage: 学習段階 ('prediction' または 'reflection')
+    """
     try:
-        prompt_path = PROMPTS_DIR / f"{unit_name}.md"
+        # stageが指定されている場合、段階別プロンプトを読み込む
+        if stage:
+            stage_suffix = "_prediction" if stage == "prediction" else "_reflection"
+            prompt_path = PROMPTS_DIR / f"{unit_name}{stage_suffix}.md"
+        else:
+            # 従来の単一プロンプトにフォールバック
+            prompt_path = PROMPTS_DIR / f"{unit_name}.md"
+        
         with open(prompt_path, 'r', encoding='utf-8') as f:
             return f.read().strip()
     except FileNotFoundError:
@@ -1235,8 +1247,8 @@ def chat():
     # 対話履歴に追加
     conversation.append({'role': 'user', 'content': user_message})
     
-    # 単元ごとのプロンプトを読み込み
-    unit_prompt = load_unit_prompt(unit)
+    # 単元ごとのプロンプトを読み込み（stage指定で段階別プロンプト）
+    unit_prompt = load_unit_prompt(unit, stage='prediction')
     
     # 対話履歴を含めてプロンプト作成
     # OpenAI APIに送信するためにメッセージ形式で構築
@@ -1848,8 +1860,8 @@ def reflect_chat():
     # 反省対話履歴に追加
     reflection_conversation.append({'role': 'user', 'content': user_message})
     
-    # プロンプトファイルからベースプロンプトを取得
-    unit_prompt = load_unit_prompt(unit)
+    # プロンプトファイルからベースプロンプトを取得（考察段階用）
+    unit_prompt = load_unit_prompt(unit, stage='reflection')
     
     # 考察段階のシステムプロンプトを構築
     reflection_system_prompt = f"""
