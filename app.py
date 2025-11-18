@@ -1946,14 +1946,27 @@ def reflect_chat():
             class_number=session.get('class_number')
         )
         
-        # 対話が2往復以上あれば、考察のまとめを作成可能
-        # ユーザーメッセージが2回以上必要
+        # 対話が充分に進んでいるかを判定（会話が自然に終わったと判断）
         user_messages_count = sum(1 for msg in reflection_conversation if msg['role'] == 'user')
-        suggest_final_summary = user_messages_count >= 2
+        
+        # ユーザーメッセージが3回以上あり、最後のAI応答が「まとめるか？」的な提案をしている場合、自動でまとめを生成
+        should_auto_generate_summary = False
+        suggest_final_summary = False
+        
+        if user_messages_count >= 3:
+            # AIが「まとめましょう」「では、ここまでをまとめますね」などの提案をしているかチェック
+            summary_trigger_keywords = ['まとめ', 'まとめます', 'まとめましょう', 'ここまで', 'では、', 'よくわかったね']
+            if any(keyword in ai_message for keyword in summary_trigger_keywords):
+                should_auto_generate_summary = True
+            else:
+                suggest_final_summary = True  # ボタン表示を促す
+        elif user_messages_count >= 2:
+            suggest_final_summary = True  # ボタン表示を促す
         
         return jsonify({
             'response': ai_message,
-            'suggest_final_summary': suggest_final_summary
+            'suggest_final_summary': suggest_final_summary,
+            'should_auto_generate_summary': should_auto_generate_summary
         })
         
     except Exception as e:
@@ -2000,11 +2013,35 @@ def final_summary():
         }), 400
     
     # 単元のプロンプトを読み込み（考察の指示は既にプロンプトファイルに含まれている）
-    unit_prompt = load_unit_prompt(unit)
+    unit_prompt = load_unit_prompt(unit, stage='reflection')
     
     # メッセージフォーマットで構築
     messages = [
-        {"role": "system", "content": unit_prompt + "\n\n【重要】以下の会話内容のみをもとに、児童の話した言葉や考えを活かして、考察をまとめてください。会話に含まれていない内容は追加しないでください。"}
+        {"role": "system", "content": f"""{unit_prompt}
+
+## 重要な指示：考察をまとめる際のルール
+
+あなたはこれからの会話内容をもとに、児童の「考察」をまとめます。以下を厳守してください：
+
+1. **児童の言葉を活かす**
+   - 児童が実際に話した表現をできるだけ活かす
+   - 「〜だと思う」「〜なんだ」など、児童の口調を保つ
+
+2. **会話の流れから自然に**
+   - 会話に含まれていない内容は絶対に追加しない
+   - AIの説明や専門用語を加えない
+   - 児童の気づきを箇条書きではなく、1～3段落の文章でまとめる
+
+3. **年齢に合わせた表現**
+   - 小学4年生が理解できる言葉のみ
+   - 漢字は小学3年生までの範囲
+   - 簡潔で分かりやすい文体
+
+4. **長さの目安**
+   - 1～3段落程度（150～250字程度）
+   - まとめすぎず、児童の思考過程が伝わるように
+
+## 会話内容から、児童の考察をまとめてください"""}
     ]
     
     # 対話履歴をメッセージフォーマットで追加
@@ -2017,9 +2054,11 @@ def final_summary():
     # 最後に考察作成を促すメッセージを追加
     messages.append({
         "role": "user",
-        "content": f"""これまでの話と以下の予想をもとに、考察をまとめてください。児童の思考過程と対話内容を尊重しながら、文章で表現してください。会話に含まれていない内容は追加しないでください。
+        "content": f"""これまでの対話から、児童の考察をまとめてください。
 
-【作成した予想】
+児童が上記の対話で述べた内容（観察結果、気づき、考え）を、児童の言葉を活かしながら、1～3段落の文章でまとめてください。児童の思考過程と表現を尊重してください。
+
+【児童が作成した予想】
 {prediction_summary}"""
     })
     

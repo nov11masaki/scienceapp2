@@ -899,6 +899,7 @@ function sendMessageToAPI(message) {
     })
     .then(data => {
         console.log('【DEBUG】JSONレスポンス:', data);
+        console.log('【DEBUG】should_auto_generate_summary:', data.should_auto_generate_summary);
         
         if (data.error) {
             console.error('【DEBUG】エラーレスポンス:', data.error);
@@ -909,13 +910,19 @@ function sendMessageToAPI(message) {
             addMessage(data.response, 'ai', true); // タイピングエフェクト有効
             reflectionConversationCount++;
             
-            // ユーザーメッセージ数をカウント（往復数 * 2 でメッセージ総数を算出
-            // ）
+            // ユーザーメッセージ数をカウント
             const totalMessages = reflectionConversationCount * 2;
             
-            // 6メッセージ以上またはAIが「まとめ」を促したら要約ボタンを表示
-            if (totalMessages >= 6 || data.suggest_summary || data.response.includes('まとめ') || data.response.includes('要約')) {
-                showReflectionSummaryButton(`会話数:${totalMessages}/${6} / suggest:${data.suggest_summary}`);
+            // 自動まとめ生成フラグがONの場合、自動でまとめを生成
+            if (data.should_auto_generate_summary) {
+                console.log('【DEBUG】自動まとめ生成をトリガー');
+                // 短い遅延後に自動まとめ生成
+                setTimeout(() => {
+                    getSummary();
+                }, 1000);
+            } else if (data.suggest_final_summary) {
+                // まとめボタン表示を促す
+                showReflectionSummaryButton(`会話数:${totalMessages}/${6}`);
             }
             
             // デジタル学習ツインのインサイトを表示（開発時のみ）
