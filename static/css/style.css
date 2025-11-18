@@ -3455,12 +3455,11 @@ body {
 }
 
 .chat-section .chat-container {
-    flex: 0 1 auto;
+    flex: 1 1 auto;
     overflow-y: auto;
     margin-bottom: 0px;
     display: flex;
     flex-direction: column;
-    max-height: 20vh;
 }
 
 .chat-section .chat-messages {
@@ -3726,11 +3725,23 @@ body {
     .chat-section {
         height: 50vh;
         padding: 4px;
+        flex-shrink: 0;
+    }
+    
+    .chat-section .chat-container {
+        flex: 1 1 auto;
+        overflow-y: auto;
+    }
+    
+    .chat-section .chat-messages {
+        overflow-y: auto;
+        word-wrap: break-word;
     }
     
     .input-assist-section {
         height: 50vh;
         padding: 3px;
+        flex-shrink: 0;
     }
     
     .input-label {
@@ -3746,21 +3757,13 @@ body {
     .chat-input-area textarea {
         font-size: 0.9rem;
         padding: 8px 10px;
+        max-height: 60px;
+        overflow-y: auto;
     }
     
     .chat-input-area .btn {
         font-size: 0.85rem;
         padding: 6px 10px;
-    }
-    
-    .chat-input-area textarea {
-        font-size: 0.9rem;
-        padding: 5px 8px;
-    }
-    
-    .chat-input-area .btn {
-        font-size: 0.85rem;
-        padding: 5px 10px;
     }
     
     .keyboard-area .keyboard-grid,
@@ -3827,11 +3830,18 @@ body {
     .chat-section {
         height: 48vh;
         padding: 3px;
+        flex-shrink: 0;
+    }
+    
+    .chat-section .chat-container {
+        flex: 1 1 auto;
+        overflow-y: auto;
     }
     
     .input-assist-section {
         height: 52vh;
         padding: 2px;
+        flex-shrink: 0;
     }
     
     .input-label {
@@ -3847,6 +3857,8 @@ body {
     .chat-input-area textarea {
         font-size: 0.85rem;
         padding: 6px 8px;
+        max-height: 50px;
+        overflow-y: auto;
     }
     
     .chat-input-area .btn {

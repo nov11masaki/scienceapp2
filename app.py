@@ -1146,7 +1146,6 @@ def prediction():
     class_number = normalize_class_value(class_number) or normalize_class_value(session.get('class_number')) or '1'
     student_number = request.args.get('number', session.get('student_number', '1'))
     unit = request.args.get('unit')
-    resume = request.args.get('resume', 'false').lower() == 'true'
     
     # 異なる単元に移動した場合、セッションをクリア
     current_unit = session.get('unit')
@@ -1166,16 +1165,9 @@ def prediction():
     
     # 進行状況をチェック
     progress = get_student_progress(class_number, student_number, unit)
-    stage_progress = progress.get('stage_progress', {})
-    prediction_stage = stage_progress.get('prediction', {})
-    prediction_summary_created = prediction_stage.get('summary_created', False)
-    conversation_count = prediction_stage.get('conversation_count', 0)
     
-    # セッションに会話履歴があるか確認
-    session_conversation = session.get('conversation')
-    student_id = f"{class_number}_{student_number}"
-    
-    # 新規開始 - セッションを常に完全にリセット（本番環境でも同じ振る舞い）
+    # 常に新規開始 - セッションを完全にリセット
+    # (中断・リロード時に会話履歴は復元しない)
     session.clear()
     session['class_number'] = class_number
     session['student_number'] = student_number
@@ -1186,35 +1178,7 @@ def prediction():
     session['prediction_summary'] = ''
     session['prediction_summary_created'] = False
     
-    # resume パラメータが明示的に指定されている場合のみ復帰情報を提供
-    if resume:
-        resumption_info = {
-            'is_resumption': True,
-            'last_conversation_count': conversation_count,
-            'last_access': progress.get('last_access', ''),
-            'prediction_summary_created': prediction_summary_created
-        }
-        
-        # まとめが完了している場合は保存されたまとめを復元
-        if prediction_summary_created and not session.get('prediction_summary'):
-            logs = load_learning_logs(datetime.now().strftime('%Y%m%d'))
-            for log in logs:
-                if (log.get('student_number') == student_number and 
-                    log.get('unit') == unit and 
-                    log.get('log_type') == 'prediction_summary'):
-                    session['prediction_summary'] = log.get('data', {}).get('summary', '')
-                    break
-        
-        print(f"[PREDICTION] 復帰モード: conversation_count={conversation_count}, summary_created={prediction_summary_created}")
-    else:
-        resumption_info = {
-            'is_resumption': False,
-            'prediction_summary_created': False,
-            'last_conversation_count': 0,
-            'last_access': progress.get('last_access', '')
-        }
-        
-        print(f"[PREDICTION] 新規開始モード")
+    print(f"[PREDICTION] 新規開始モード")
     
     # 予想段階開始を記録
     update_student_progress(class_number, student_number, unit)
@@ -1702,16 +1666,14 @@ def _load_summary_gcs(student_id, unit, stage):
     return None
 
 @app.route('/reflection')
-
 def reflection():
     unit = request.args.get('unit', session.get('unit'))
     class_number = normalize_class_value(session.get('class_number', '1')) or '1'
     student_number = session.get('student_number')
     session['class_number'] = class_number
     prediction_summary = session.get('prediction_summary')
-    resume = request.args.get('resume', 'false').lower() == 'true'
     
-    print(f"[REFLECTION] アクセス: unit={unit}, student={class_number}_{student_number}, resume={resume}")
+    print(f"[REFLECTION] アクセス: unit={unit}, student={class_number}_{student_number}")
     
     # 進行状況をチェック
     progress = get_student_progress(class_number, student_number, unit)
@@ -1720,7 +1682,7 @@ def reflection():
     prediction_summary_created = prediction_stage.get('summary_created', False)
     
     # 予想が完了していない場合はアクセス拒否
-    if not prediction_summary_created and not resume:
+    if not prediction_summary_created:
         print(f"[REFLECTION] 予想未完了のため考察へのアクセスを拒否")
         flash('考察に進む前に、予想を完了してください。', 'warning')
         return redirect(url_for('select_unit', class_number=class_number, student_number=student_number))
@@ -1736,16 +1698,15 @@ def reflection():
     
     session['unit'] = unit
     
-    # 進行状況をチェック
-    reflection_stage = stage_progress.get('reflection', {})
-    reflection_summary_created = reflection_stage.get('summary_created', False)
-    reflection_conversation_count = reflection_stage.get('conversation_count', 0)
+    # 常に新規開始 - セッションを完全にリセット
+    # (中断・リロード時に会話履歴は復元しない)
+    session.pop('reflection_conversation', None)
+    session.pop('reflection_summary', None)
+    session.pop('reflection_summary_created', None)
+    session['reflection_conversation'] = []
     
-    # セッションに会話履歴があるか確認
-    session_reflection_conversation = session.get('reflection_conversation')
-    student_id = f"{class_number}_{student_number}"
-
     # 予想まとめがセッションに存在しない場合はストレージから復元
+    student_id = f"{class_number}_{student_number}"
     if (not prediction_summary) and unit and student_number:
         restored_prediction_summary = _load_summary_from_db(student_id, unit, 'prediction')
         if restored_prediction_summary:
@@ -1753,70 +1714,14 @@ def reflection():
             session['prediction_summary'] = restored_prediction_summary
             print(f"[REFLECTION] 予想まとめをストレージから復元: {len(restored_prediction_summary)} 文字")
     
-    # resume パラメータが明示的に指定されている場合のみ復元
-    if resume:
-        # 復元: セッション → DB保存 → ローカルログ
-        if not session_reflection_conversation:
-            db_reflection_conversation = load_session_from_db(student_id, unit, 'reflection')
-            if db_reflection_conversation:
-                session['reflection_conversation'] = db_reflection_conversation
-                session_reflection_conversation = db_reflection_conversation
-                print(f"[REFLECTION] DB から会話を復元: {len(db_reflection_conversation)} メッセージ")
-        
-        if not session_reflection_conversation and reflection_conversation_count > 0:
-            session['reflection_conversation'] = progress.get('reflection_conversation_history', [])
-            session_reflection_conversation = session['reflection_conversation']
-        
-        print(f"[REFLECTION] 復帰情報: 会話数={len(session.get('reflection_conversation', []))}, 復帰=True")
-        if session.get('reflection_conversation'):
-            first_msg = session['reflection_conversation'][0] if session['reflection_conversation'] else None
-            print(f"[REFLECTION] 最初のメッセージ: {first_msg['role'] if first_msg else 'N/A'}")
-        
-        resumption_info = {
-            'is_resumption': True,
-            'last_conversation_count': reflection_conversation_count,
-            'last_access': progress.get('last_access', ''),
-            'reflection_summary_created': reflection_summary_created
-        }
-        
-        # まとめが完了している場合は保存されたまとめを復元
-        if reflection_summary_created and not session.get('reflection_summary'):
-            logs = load_learning_logs(datetime.now().strftime('%Y%m%d'))
-            for log in logs:
-                if (log.get('student_number') == student_number and 
-                    log.get('unit') == unit and 
-                    log.get('log_type') == 'final_summary'):
-                    session['reflection_summary'] = log.get('data', {}).get('summary', '')
-                    break
-    else:
-        # 新規開始 - セッションをクリア
-        session.pop('reflection_conversation', None)
-        session.pop('reflection_summary', None)
-    # 新規開始 - セッション完全リセット（本番環境でも同じ振る舞い）
-    session.pop('reflection_conversation', None)
-    session.pop('reflection_summary', None)
-    session.pop('reflection_summary_created', None)
-    session['reflection_conversation'] = []
+    print(f"[REFLECTION] 新規開始モード")
     
-    # resume パラメータが明示的に指定されている場合のみ復帰情報を提供
-    if resume:
-        resumption_info = {
-            'is_resumption': True,
-            'last_conversation_count': reflection_conversation_count,
-            'last_access': progress.get('last_access', ''),
-            'reflection_summary_created': reflection_summary_created
-        }
-        
-        # まとめが完了している場合は保存されたまとめを復元
-        if reflection_summary_created and not session.get('reflection_summary'):
-            logs = load_learning_logs(datetime.now().strftime('%Y%m%d'))
-            for log in logs:
-                if (log.get('student_number') == student_number and 
-                    log.get('unit') == unit and 
-                    log.get('log_type') == 'final_summary'):
-                    session['reflection_summary'] = log.get('data', {}).get('summary', '')
-                    break
-        
+    # 常に新規開始のため、resumption_infoは常にFalse
+    reflection_summary_created = stage_progress.get('reflection', {}).get('summary_created', False)
+    resumption_info = {
+        'is_resumption': False,
+        'reflection_summary_created': reflection_summary_created
+    }
         print(f"[REFLECTION] 復帰モード: conversation_count={reflection_conversation_count}, summary_created={reflection_summary_created}")
     else:
         resumption_info = {
