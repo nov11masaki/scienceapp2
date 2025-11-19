@@ -16,7 +16,7 @@
                     <span class="badge bg-primary fs-6">{{ unit }}</span>
                 </div>
                 <!-- ボタンを右上に配置 -->
-                <div style="position: absolute; top: 10px; right: 10px; display: flex; gap: 8px;">
+                <div class="button-container-top-right">
                     <button class="btn btn-secondary btn-sm" id="backToUnitHeaderButton" onclick="goBackToUnitSelection()">
                         <i class="fas fa-arrow-left me-2"></i>
                         単元選択に戻る
@@ -58,7 +58,7 @@
                     </div>
                     
                     <!-- 入力エリア（直接入力可能） -->
-                    <div class="message user-message user-input-area input-compact" style="margin-top: 12px;">
+                    <div class="message user-message user-input-area input-compact">
                         <div class="user-input-wrapper">
                             <div class="input-with-send">
                                 <textarea class="user-input-bubble placeholder-input" id="messageInput" placeholder="ここに入力してください"></textarea>
