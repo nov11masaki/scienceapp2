@@ -2436,3 +2436,215 @@ if __name__ == '__main__':
     # 本番環境ではdebug=False
     debug_mode = os.environ.get('FLASK_ENV') != 'production'
     app.run(host='0.0.0.0', port=port, debug=debug_mode)
+
+
+# ===== 分析機能 =====
+
+@app.route('/teacher/analysis_dashboard')
+@require_teacher_auth
+def analysis_dashboard():
+    """教員用分析ダッシュボード"""
+    return render_template('teacher/analysis_dashboard.html', units=UNITS)
+
+
+@app.route('/teacher/analysis')
+@require_teacher_auth
+def teacher_analysis():
+    """教員用分析ダッシュボード"""
+    unit = request.args.get('unit', '')
+    date = request.args.get('date', datetime.now().strftime('%Y%m%d'))
+    
+    try:
+        # ログを読み込み
+        logs = load_learning_logs(date)
+        
+        if unit:
+            logs = [log for log in logs if log.get('unit') == unit]
+        
+        # 分析を実行
+        analysis_result = analyze_predictions_and_reflections(logs)
+        
+        return jsonify({
+            'success': True,
+            'date': date,
+            'unit': unit,
+            'analysis': analysis_result,
+            'log_count': len(logs)
+        })
+    except Exception as e:
+        print(f"[ANALYSIS] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def analyze_predictions_and_reflections(logs):
+    """予想と考察のテキスト分析"""
+    try:
+        prediction_logs = [log for log in logs if log.get('log_type') == 'prediction_chat']
+        reflection_logs = [log for log in logs if log.get('log_type') == 'reflection_chat']
+        
+        result = {
+            'total_logs': len(logs),
+            'prediction_chats': len(prediction_logs),
+            'reflection_chats': len(reflection_logs),
+            'predictions_by_unit': {},
+            'reflections_by_unit': {},
+            'text_analysis': {}
+        }
+        
+        # 単元ごとに分類
+        for log in prediction_logs:
+            unit = log.get('unit', '不明')
+            if unit not in result['predictions_by_unit']:
+                result['predictions_by_unit'][unit] = []
+            
+            data = log.get('data', {})
+            result['predictions_by_unit'][unit].append({
+                'student': f"{log.get('class_num', 0)}_{log.get('seat_num', 0)}",
+                'user_message': data.get('user_message', ''),
+                'ai_response': data.get('ai_response', '')
+            })
+        
+        for log in reflection_logs:
+            unit = log.get('unit', '不明')
+            if unit not in result['reflections_by_unit']:
+                result['reflections_by_unit'][unit] = []
+            
+            data = log.get('data', {})
+            result['reflections_by_unit'][unit].append({
+                'student': f"{log.get('class_num', 0)}_{log.get('seat_num', 0)}",
+                'user_message': data.get('user_message', ''),
+                'ai_response': data.get('ai_response', '')
+            })
+        
+        # テキスト分析
+        for unit in result['predictions_by_unit']:
+            prediction_messages = [
+                p['user_message'] for p in result['predictions_by_unit'][unit] if p['user_message']
+            ]
+            reflection_messages = [
+                r['user_message'] for r in result.get('reflections_by_unit', {}).get(unit, [])
+                if r['user_message']
+            ]
+            
+            result['text_analysis'][unit] = {
+                'prediction': analyze_text(prediction_messages),
+                'reflection': analyze_text(reflection_messages)
+            }
+        
+        return result
+    
+    except Exception as e:
+        print(f"[ANALYSIS] Analysis error: {e}")
+        return {'error': str(e)}
+
+
+def analyze_text(messages):
+    """テキスト分析（キーワード、頻度、文字数など）"""
+    if not messages:
+        return {
+            'total_messages': 0,
+            'average_length': 0,
+            'keywords': [],
+            'common_patterns': []
+        }
+    
+    try:
+        # 基本統計
+        message_lengths = [len(msg) for msg in messages]
+        
+        # キーワード抽出（簡易版：名詞と重要な表現）
+        keywords = extract_keywords(messages)
+        
+        # 一般的なパターン検出
+        patterns = detect_patterns(messages)
+        
+        return {
+            'total_messages': len(messages),
+            'average_length': sum(message_lengths) / len(message_lengths) if message_lengths else 0,
+            'max_length': max(message_lengths) if message_lengths else 0,
+            'min_length': min(message_lengths) if message_lengths else 0,
+            'keywords': keywords[:10],  # トップ10
+            'patterns': patterns
+        }
+    
+    except Exception as e:
+        print(f"[TEXT_ANALYSIS] Error: {e}")
+        return {'error': str(e)}
+
+
+def extract_keywords(messages):
+    """キーワード抽出（日本語対応）"""
+    try:
+        import re
+        from collections import Counter
+        
+        # 複合メッセージを結合
+        combined_text = ' '.join(messages)
+        
+        # ひらがなとカタカナの単語を抽出
+        # 3文字以上の連続した仮名を抽出
+        hiragana_pattern = r'[ぁ-ん]{3,}'
+        katakana_pattern = r'[ァ-ヴー]{3,}'
+        kanji_pattern = r'[\u4e00-\u9fff]{2,}'
+        
+        words = []
+        words.extend(re.findall(hiragana_pattern, combined_text))
+        words.extend(re.findall(katakana_pattern, combined_text))
+        words.extend(re.findall(kanji_pattern, combined_text))
+        
+        # ストップワード（一般的な助詞などを除外）
+        stopwords = {'思う', 'ます', 'です', 'ある', 'する', 'なる', 'いる', 'できる', 'みたい', 'ような', 'いっぱい', 'すごく'}
+        words = [w for w in words if w not in stopwords]
+        
+        # 頻度を計算
+        word_freq = Counter(words)
+        
+        # 頻度順に返す
+        return [{'word': word, 'count': count} for word, count in word_freq.most_common()]
+    
+    except Exception as e:
+        print(f"[KEYWORD_EXTRACTION] Error: {e}")
+        return []
+
+
+def detect_patterns(messages):
+    """パターン検出（予想の表現、因果関係など）"""
+    try:
+        patterns = {
+            'prediction_expressions': 0,  # 「〜だと思う」「〜と思う」など
+            'causal_expressions': 0,      # 「〜だから」「なぜなら」など
+            'comparison_expressions': 0,   # 「〜より」「〜ほうが」など
+            'experience_references': 0,    # 「前に」「この前」など
+            'uncertainty_expressions': 0  # 「たぶん」「かもしれない」など
+        }
+        
+        prediction_keywords = ['思う', 'と思う', 'だと思う', 'と予想']
+        causal_keywords = ['だから', 'なぜなら', 'ので', 'わけ']
+        comparison_keywords = ['より', 'ほうが', '比べて', 'より大きい']
+        experience_keywords = ['前に', 'この前', '経験', 'やったことある']
+        uncertainty_keywords = ['たぶん', 'かもしれない', 'わからない', 'かな']
+        
+        for message in messages:
+            for keyword in prediction_keywords:
+                if keyword in message:
+                    patterns['prediction_expressions'] += 1
+            for keyword in causal_keywords:
+                if keyword in message:
+                    patterns['causal_expressions'] += 1
+            for keyword in comparison_keywords:
+                if keyword in message:
+                    patterns['comparison_expressions'] += 1
+            for keyword in experience_keywords:
+                if keyword in message:
+                    patterns['experience_references'] += 1
+            for keyword in uncertainty_keywords:
+                if keyword in message:
+                    patterns['uncertainty_expressions'] += 1
+        
+        return patterns
+    
+    except Exception as e:
+        print(f"[PATTERN_DETECTION] Error: {e}")
+        return {}
