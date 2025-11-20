@@ -1606,37 +1606,6 @@ def _save_summary_gcs(summary_entry):
     except Exception as e:
         print(f"[SUMMARY_SAVE] GCS Error: {e}")
 
-@app.route('/api/get-session', methods=['GET'])
-def get_session():
-    """サーバーからセッションデータを取得（GCS/ローカル）"""
-    try:
-        student_id = request.args.get('student_id')
-        unit = request.args.get('unit')
-        stage = request.args.get('stage')  # 'prediction' or 'reflection'
-        
-        if not all([student_id, unit, stage]):
-            return jsonify({'error': '必須パラメータが不足しています'}), 400
-        
-        # サーバーからセッションを読み込み
-        conversation = load_session_from_db(student_id, unit, stage)
-        
-        # サマリーも読み込み
-        summary = _load_summary_from_db(student_id, unit, stage)
-        
-        print(f"[RETRIEVE] Session retrieved - {student_id}_{unit}_{stage}")
-        return jsonify({
-            'success': True,
-            'chat_messages': conversation,
-            'summary_content': summary
-        })
-    
-    except Exception as e:
-        print(f"[RETRIEVE] Error: {e}")
-        return jsonify({
-            'error': 'セッションの取得に失敗しました',
-            'details': str(e)
-        }), 500
-
 def _save_summary_to_db(student_id, unit, stage, summary_text):
     """サマリーを永続ストレージに保存（GCS優先、ローカルはフォールバック）"""
     # 本番環境: GCS優先

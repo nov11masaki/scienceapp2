@@ -186,24 +186,13 @@ function goToPrediction(unit) {
         const confirmRedo = confirm('予想をやり直しますか？\n\n前回の予想は記録として保存されます。\n新たに予想を立て直します。\n\nよろしいですか？');
         
         if (confirmRedo) {
-            window.location.href = `/prediction?class=${classNumber}&number=${studentNumber}&unit=${encodeURIComponent(unit)}&resume=false`;
+            window.location.href = `/prediction?class=${classNumber}&number=${studentNumber}&unit=${encodeURIComponent(unit)}`;
         }
         return;
     }
     
-    if (needsResumption) {
-        const confirmResume = confirm(`この単元は前回の続きがあります。\n前回の続きから始めますか？\n\n進行状況: ${progress.progress_summary}\n\nOK: 続きから開始\nキャンセル: 最初から開始`);
-        
-        setTimeout(() => {
-            if (confirmResume) {
-                window.location.href = `/prediction?class=${classNumber}&number=${studentNumber}&unit=${encodeURIComponent(unit)}&resume=true`;
-            } else {
-                window.location.href = `/prediction?class=${classNumber}&number=${studentNumber}&unit=${encodeURIComponent(unit)}`;
-            }
-        }, 300);
-    } else {
-        window.location.href = `/prediction?class=${classNumber}&number=${studentNumber}&unit=${encodeURIComponent(unit)}`;
-    }
+    // 常に新規セッション開始（会話復帰機能はなし）
+    window.location.href = `/prediction?class=${classNumber}&number=${studentNumber}&unit=${encodeURIComponent(unit)}`;
 }
 
 function goToReflection(unit) {
@@ -230,24 +219,13 @@ function goToReflection(unit) {
         const confirmRedo = confirm('考察をやり直しますか？\n\n前回の考察は記録として保存されます。\n新たに考察を立て直します。\n\nよろしいですか？');
         
         if (confirmRedo) {
-            window.location.href = `/reflection?class=${classNumber}&number=${studentNumber}&unit=${encodeURIComponent(unit)}&resume=false`;
+            window.location.href = `/reflection?class=${classNumber}&number=${studentNumber}&unit=${encodeURIComponent(unit)}`;
         }
         return;
     }
     
-    if (reflectionNeedsResumption) {
-        const confirmResume = confirm(`この単元の考察に前回の続きがあります。\n前回の続きから始めますか？\n\n進行状況: ${progress.progress_summary}\n\nOK: 続きから開始\nキャンセル: 最初から開始`);
-        
-        setTimeout(() => {
-            if (confirmResume) {
-                window.location.href = `/reflection?class=${classNumber}&number=${studentNumber}&unit=${encodeURIComponent(unit)}&resume=true`;
-            } else {
-                window.location.href = `/reflection?class=${classNumber}&number=${studentNumber}&unit=${encodeURIComponent(unit)}`;
-            }
-        }, 300);
-    } else {
-        window.location.href = `/reflection?class=${classNumber}&number=${studentNumber}&unit=${encodeURIComponent(unit)}`;
-    }
+    // 常に新規セッション開始（会話復帰機能はなし）
+    window.location.href = `/reflection?class=${classNumber}&number=${studentNumber}&unit=${encodeURIComponent(unit)}`;
 }
 
 function selectUnit(unit) {
