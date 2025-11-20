@@ -538,11 +538,11 @@ def call_openai_with_retry(prompt, max_retries=3, delay=2, unit=None, stage=None
             
             # stage（学習段階）に応じてtemperatureを設定
             # 予想段階: より創造的で多様な回答 (1.0)
-            # 考察段階: より創造的で多様な回答 (1.0) - 複数の解釈を引き出すため
+            # 考察段階: より創造的で多様な回答 (1.0) - 実験後の新しい気づきを促す
             if stage == 'prediction':
                 temperature = 1.0
             elif stage == 'reflection':
-                temperature = 1.0  # より多様な考察を引き出すため
+                temperature = 1.0  # 実験結果との比較から新しい視点を引き出すため
             else:
                 temperature = 0.5  # デフォルト
             
@@ -2479,7 +2479,7 @@ def teacher_analysis():
 
 
 def analyze_predictions_and_reflections(logs):
-    """予想と考察のテキスト分析"""
+    """予想と考察のテキスト分析 + 埋め込み + クラスタリング"""
     try:
         prediction_logs = [log for log in logs if log.get('log_type') == 'prediction_chat']
         reflection_logs = [log for log in logs if log.get('log_type') == 'reflection_chat']
@@ -2491,8 +2491,9 @@ def analyze_predictions_and_reflections(logs):
             'predictions_by_unit': {},
             'reflections_by_unit': {},
             'text_analysis': {},
-            'clustering_analysis': {},
-            'insights': {}
+            'embeddings_analysis': {},
+            'insights': {},
+            'prompt_recommendations': {}
         }
         
         # 単元ごとに分類
@@ -2520,7 +2521,7 @@ def analyze_predictions_and_reflections(logs):
                 'ai_response': data.get('ai_response', '')
             })
         
-        # テキスト分析とクラスタリング
+        # テキスト分析
         for unit in result['predictions_by_unit']:
             prediction_messages = [
                 p['user_message'] for p in result['predictions_by_unit'][unit] if p['user_message']
@@ -2535,17 +2536,27 @@ def analyze_predictions_and_reflections(logs):
                 'reflection': analyze_text(reflection_messages)
             }
             
-            # クラスタリング分析
-            result['clustering_analysis'][unit] = {
-                'prediction': cluster_messages(prediction_messages),
-                'reflection': cluster_messages(reflection_messages)
-            }
+            # 埋め込み + クラスタリング分析
+            result['embeddings_analysis'][unit] = analyze_with_embeddings(
+                prediction_messages, 
+                reflection_messages, 
+                unit
+            )
             
             # インサイト生成
             result['insights'][unit] = generate_insights(
-                prediction_messages, 
+                prediction_messages,
                 reflection_messages,
-                result['clustering_analysis'][unit]
+                result['text_analysis'][unit],
+                unit
+            )
+            
+            # プロンプト改善提案
+            result['prompt_recommendations'][unit] = recommend_prompt_improvements(
+                prediction_messages,
+                reflection_messages,
+                result['insights'][unit],
+                unit
             )
         
         return result
@@ -2555,6 +2566,221 @@ def analyze_predictions_and_reflections(logs):
         import traceback
         traceback.print_exc()
         return {'error': str(e)}
+
+
+def analyze_with_embeddings(prediction_messages, reflection_messages, unit):
+    """埋め込み + クラスタリング分析"""
+    try:
+        all_messages = prediction_messages + reflection_messages
+        if len(all_messages) < 2:
+            return {'clusters': [], 'cluster_count': 0}
+        
+        # テキスト埋め込みを取得
+        embeddings = []
+        for msg in all_messages:
+            if msg.strip():
+                embedding = get_text_embedding(msg)
+                if embedding:
+                    embeddings.append({
+                        'text': msg,
+                        'embedding': embedding,
+                        'stage': 'prediction' if msg in prediction_messages else 'reflection'
+                    })
+        
+        if len(embeddings) < 2:
+            return {'clusters': [], 'cluster_count': 0}
+        
+        # クラスタリング（K-means）
+        embedding_vectors = np.array([e['embedding'] for e in embeddings])
+        
+        # 適切なクラスタ数を決定（3～5）
+        n_clusters = min(max(3, len(embeddings) // 3), 5)
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        clusters = kmeans.fit_predict(embedding_vectors)
+        
+        # クラスタを分類
+        cluster_groups = {}
+        for idx, (embedding, cluster_id) in enumerate(zip(embeddings, clusters)):
+            if cluster_id not in cluster_groups:
+                cluster_groups[cluster_id] = []
+            cluster_groups[cluster_id].append(embedding)
+        
+        # クラスタの特徴を抽出
+        cluster_summaries = []
+        for cluster_id, items in cluster_groups.items():
+            representative = items[0]['text']  # 代表テキスト
+            stage_ratio = sum(1 for item in items if item['stage'] == 'prediction') / len(items)
+            
+            cluster_summaries.append({
+                'cluster_id': int(cluster_id),
+                'size': len(items),
+                'representative_text': representative,
+                'prediction_ratio': round(stage_ratio * 100, 1),
+                'reflection_ratio': round((1 - stage_ratio) * 100, 1),
+                'sample_texts': [item['text'] for item in items[:3]]
+            })
+        
+        return {
+            'clusters': cluster_summaries,
+            'cluster_count': len(cluster_summaries),
+            'total_messages': len(embeddings)
+        }
+    
+    except Exception as e:
+        print(f"[EMBEDDINGS] Error: {e}")
+        return {'clusters': [], 'cluster_count': 0, 'error': str(e)}
+
+
+def get_text_embedding(text):
+    """テキストの埋め込みを取得（OpenAI Embeddings API）"""
+    try:
+        response = client.embeddings.create(
+            model="text-embedding-3-small",
+            input=text
+        )
+        return response.data[0].embedding
+    except Exception as e:
+        print(f"[EMBEDDING_ERROR] {e}")
+        return None
+
+
+def generate_insights(prediction_messages, reflection_messages, text_analysis, unit):
+    """ログから洞察を生成"""
+    try:
+        insights = []
+        
+        # 予想の多様性
+        pred_analysis = text_analysis.get('prediction', {})
+        pred_keywords = pred_analysis.get('keywords', [])
+        if pred_keywords:
+            insights.append(
+                f"【{unit}の予想の特徴】\n"
+                f"児童の予想には、以下のキーワードが頻出しています: "
+                f"{', '.join([kw['word'] for kw in pred_keywords[:5]])}。\n"
+                f"これは、児童が単元の核心的な概念に気づいていることを示唆しています。"
+            )
+        
+        # 予想と考察の比較
+        if prediction_messages and reflection_messages:
+            insights.append(
+                f"【予想から考察への学習過程】\n"
+                f"予想段階で{len(prediction_messages)}件、考察段階で{len(reflection_messages)}件の発言がありました。\n"
+                f"実験を通じて、児童の理解がどの程度深まったかを検証する機会があります。"
+            )
+        
+        # 表現パターンから読み取る理解度
+        pred_patterns = pred_analysis.get('patterns', {})
+        refl_patterns = text_analysis.get('reflection', {}).get('patterns', {})
+        
+        causal_growth = (refl_patterns.get('causal_expressions', 0) - 
+                        pred_patterns.get('causal_expressions', 0))
+        if causal_growth > 0:
+            insights.append(
+                f"【因果関係の理解深化】\n"
+                f"考察段階で因果表現（「だから」「なぜなら」）が"
+                f"{causal_growth}回増加しました。\n"
+                f"児童が実験結果を基に因果関係を構築しようとしていることが示唆されます。"
+            )
+        
+        # 経験参照の活用
+        exp_refs = pred_patterns.get('experience_references', 0)
+        if exp_refs > 0:
+            insights.append(
+                f"【日常経験との結びつき】\n"
+                f"予想段階で{exp_refs}回、児童の日常経験が参照されました。\n"
+                f"児童が既有知識と新しい学習を結びつけようとしていることが分かります。"
+            )
+        
+        # 不確実性表現
+        uncertainty = pred_patterns.get('uncertainty_expressions', 0)
+        if uncertainty > 2:
+            insights.append(
+                f"【暫定的な理解の段階】\n"
+                f"予想段階で不確実性表現（「たぶん」「かもしれない」）が{uncertainty}回ありました。\n"
+                f"児童がまだ確実でない知識について探索的に考えていることが示唆されます。"
+            )
+        
+        return insights
+    
+    except Exception as e:
+        print(f"[INSIGHTS] Error: {e}")
+        return [f"インサイト生成エラー: {str(e)}"]
+
+
+def recommend_prompt_improvements(prediction_messages, reflection_messages, insights, unit):
+    """プロンプト改善の提案"""
+    try:
+        recommendations = []
+        
+        # メッセージの平均長から判定
+        avg_pred_len = np.mean([len(m) for m in prediction_messages if m]) if prediction_messages else 0
+        avg_refl_len = np.mean([len(m) for m in reflection_messages if m]) if reflection_messages else 0
+        
+        # 短い回答が多い場合
+        if avg_pred_len < 30:
+            recommendations.append({
+                'issue': '予想段階の回答が短い',
+                'suggestion': '児童がより詳しく理由を述べるよう促すプロンプトを追加してください。\n'
+                             'プロンプト例: 「どうしてそう思いますか？理由を詳しく教えてください。」',
+                'priority': 'high'
+            })
+        
+        if avg_refl_len < 40 and reflection_messages:
+            recommendations.append({
+                'issue': '考察段階の回答が短い',
+                'suggestion': '実験結果と予想の違いをより深く考察するよう促してください。\n'
+                             'プロンプト例: 「実験結果はどうでしたか？予想と同じでしたか？違うとしたら、'
+                             'なぜだと思いますか？」',
+                'priority': 'high'
+            })
+        
+        # 回答数が少ない場合
+        total_messages = len(prediction_messages) + len(reflection_messages)
+        if total_messages < 6:
+            recommendations.append({
+                'issue': '対話の回数が少ない',
+                'suggestion': 'AIの質問がより開かれた質問になるよう調整してください。\n'
+                             'プロンプト例: 「はい/いいえで答えずに、児童の考えを引き出す質問を心がけてください」',
+                'priority': 'medium'
+            })
+        
+        # 経験参照が少ない場合
+        if len(prediction_messages) > 0:
+            has_experience_ref = any('前' in m or '経験' in m or 'やったことある' in m 
+                                    for m in prediction_messages)
+            if not has_experience_ref:
+                recommendations.append({
+                    'issue': '児童の経験を活かせていない',
+                    'suggestion': '児童の過去の経験や日常生活との関連を引き出すよう促してください。\n'
+                                 'プロンプト例: 「このような現象、今までに見たことがありますか？'
+                                 '日常生活の中で、似たようなことを経験したことはありませんか？」',
+                    'priority': 'medium'
+                })
+        
+        # 予想と考察の大きなギャップ
+        if prediction_messages and reflection_messages:
+            if len(prediction_messages) > len(reflection_messages) * 2:
+                recommendations.append({
+                    'issue': '予想段階に比べて考察段階の対話が少ない',
+                    'suggestion': 'AI が実験結果との比較をより丁寧に促すよう改善してください。\n'
+                                 'プロンプト例: 「予想と実験結果を比べて、何が同じで何が違いましたか？」',
+                    'priority': 'medium'
+                })
+        
+        # インサイトから提案
+        if any('不確実性' in i for i in insights):
+            recommendations.append({
+                'issue': '児童の予想に不確実性が残っている',
+                'suggestion': 'より確実な理解を引き出すため、段階的な質問を用意してください。\n'
+                             'プロンプト例: 段階的に理由を深掘りし、最終的に確実な理解に到達させる',
+                'priority': 'low'
+            })
+        
+        return recommendations
+    
+    except Exception as e:
+        print(f"[RECOMMENDATIONS] Error: {e}")
+        return [{'issue': 'エラー', 'suggestion': str(e), 'priority': 'low'}]
 
 
 def analyze_text(messages):
@@ -2665,119 +2891,3 @@ def detect_patterns(messages):
     except Exception as e:
         print(f"[PATTERN_DETECTION] Error: {e}")
         return {}
-
-
-def cluster_messages(messages):
-    """メッセージをクラスタリングして類似の予想・考察をグループ化"""
-    if len(messages) < 2:
-        return {
-            'clusters': [],
-            'n_clusters': 0,
-            'cluster_summary': 'メッセージが不足しています'
-        }
-    
-    try:
-        from sklearn.feature_extraction.text import TfidfVectorizer
-        from sklearn.cluster import DBSCAN
-        from sklearn.metrics.pairwise import cosine_distances
-        
-        # TF-IDF ベクトル化
-        vectorizer = TfidfVectorizer(analyzer='char', ngram_range=(2, 3), max_features=100)
-        tfidf_matrix = vectorizer.fit_transform(messages)
-        
-        # 距離行列を計算
-        distances = cosine_distances(tfidf_matrix)
-        
-        # DBSCAN クラスタリング（eps=0.3 で調整）
-        clustering = DBSCAN(eps=0.4, min_samples=1, metric='precomputed')
-        labels = clustering.fit_predict(distances)
-        
-        n_clusters = len(set(labels))
-        
-        # クラスタごとにメッセージを分類
-        clusters = []
-        for cluster_id in sorted(set(labels)):
-            cluster_messages = [messages[i] for i in range(len(messages)) if labels[i] == cluster_id]
-            clusters.append({
-                'id': cluster_id,
-                'size': len(cluster_messages),
-                'representative': cluster_messages[0],  # 最初のメッセージを代表とする
-                'messages': cluster_messages[:3]  # 最大3件を表示
-            })
-        
-        return {
-            'clusters': clusters,
-            'n_clusters': n_clusters,
-            'total_messages': len(messages),
-            'cluster_summary': f'{n_clusters}個のグループに分類されました'
-        }
-    
-    except Exception as e:
-        print(f"[CLUSTERING] Error: {e}")
-        return {'error': str(e), 'clusters': []}
-
-
-def generate_insights(prediction_messages, reflection_messages, clustering_result):
-    """ログ分析からインサイトを自動生成"""
-    try:
-        insights = []
-        
-        # 予想段階のインサイト
-        if prediction_messages:
-            pred_text = ' '.join(prediction_messages)
-            pred_clusters = clustering_result.get('prediction', {}).get('n_clusters', 0)
-            
-            if pred_clusters >= 3:
-                insights.append(
-                    f"📊 予想が多様です: 児童の予想が{pred_clusters}つ以上の異なるパターンに分かれています。"
-                    f"これは児童が異なる経験や視点から予想を立てていることを示しています。"
-                )
-            elif pred_clusters == 1:
-                insights.append(
-                    f"🎯 予想が一致しています: ほぼすべての児童が同じパターンの予想を立てています。"
-                    f"事前知識や経験が均一である可能性があります。"
-                )
-            
-            # キーワードから学習状況を推測
-            if '経験' in pred_text or 'やったことある' in pred_text:
-                insights.append(
-                    f"✨ 経験の活用: 児童が過去の経験を根拠として予想を立てています。"
-                    f"学習前の経験を十分に活用できています。"
-                )
-            
-            if 'わかりません' in pred_text or '知りません' in pred_text:
-                insights.append(
-                    f"❓ 不確実性: 児童が自分の知識に不確実性を感じています。"
-                    f"実験を通じた学習で理解が深まる可能性が高いです。"
-                )
-        
-        # 考察段階のインサイト
-        if reflection_messages:
-            refl_text = ' '.join(reflection_messages)
-            refl_clusters = clustering_result.get('reflection', {}).get('n_clusters', 0)
-            
-            if refl_clusters != clustering_result.get('prediction', {}).get('n_clusters', 0):
-                insights.append(
-                    f"🔄 思考の変化: 考察段階での児童の回答パターンが予想段階から変わっています。"
-                    f"実験を通じた理解の深化や観点の転換が起きている可能性があります。"
-                )
-            
-            # 因果関係を理解しているかの確認
-            if 'だから' in refl_text or 'なぜなら' in refl_text or 'ので' in refl_text:
-                insights.append(
-                    f"🧠 因果関係の理解: 児童が実験結果の理由を論理的に説明しています。"
-                    f"単なる観察から原理理解へ進展している兆候があります。"
-                )
-            
-            # 関係付けの確認
-            if '日常' in refl_text or '生活' in refl_text or '同じ' in refl_text:
-                insights.append(
-                    f"🌟 関係付け: 児童が実験結果を日常生活の現象と結びつけています。"
-                    f"科学的理解の定着と応用が進んでいる可能性があります。"
-                )
-        
-        return insights
-    
-    except Exception as e:
-        print(f"[INSIGHTS] Error: {e}")
-        return [f"インサイト生成中にエラーが発生しました: {str(e)}"]
