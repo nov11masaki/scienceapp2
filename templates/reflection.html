@@ -7,24 +7,21 @@
     <div class="container-fluid h-100">
         <!-- 上半分: 対話画面 -->
         <div class="chat-section">
-            <div class="chat-header text-center mb-2">
+            <div class="chat-header text-center mb-2 position-relative">
+                <!-- 左上に配置 -->
+                <div class="header-left-button">
+                    <button class="btn btn-secondary btn-sm" id="backToUnitHeaderButton" onclick="goBackToUnitSelectionFromReflection()">
+                        <i class="fas fa-arrow-left me-2"></i>
+                        戻る
+                    </button>
+                </div>
+
                 <h2 class="mb-2">
                     <i class="fas fa-lightbulb text-primary"></i>
                     考察をまとめよう
                 </h2>
                 <div class="unit-display">
                     <span class="badge bg-primary fs-6">{{ unit }}</span>
-                </div>
-                <!-- ボタンを右上に配置 -->
-                <div class="button-container-top-right">
-                    <button class="btn btn-secondary btn-sm" id="backToUnitHeaderButton" onclick="goBackToUnitSelectionFromReflection()">
-                        <i class="fas fa-arrow-left me-2"></i>
-                        単元選択に戻る
-                    </button>
-                    <button class="btn btn-success btn-sm" id="summaryButton" onclick="getSummary()">
-                        <i class="fas fa-check me-2"></i>
-                        考察をまとめる
-                    </button>
                 </div>
             </div>
             
@@ -98,6 +95,13 @@
                     <h5 class="mb-0">
                         <i class="fas fa-edit"></i> 入力エリア
                     </h5>
+                    
+                    <!-- ここにまとめるボタンを移動 -->
+                    <button class="btn btn-success btn-sm flex-grow-1 mx-4" id="summaryButton" onclick="getSummary()">
+                        <i class="fas fa-check me-2"></i>
+                        考察をまとめる
+                    </button>
+
                     <div class="input-mode-switches">
                         <div class="form-check form-switch d-inline-block me-3">
                             <input class="form-check-input" type="checkbox" id="toggle50on">
