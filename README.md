@@ -354,22 +354,84 @@ ScienceBuddy/
 
 ## 🚀 クイックスタート
 
+### ローカル環境での起動
+
 ```bash
 # リポジトリのクローン
 git clone https://github.com/nov11masaki/ScienceBuddy.git
 cd ScienceBuddy
 
+# 仮想環境の作成
+python -m venv .venv
+source .venv/bin/activate  # Windowsの場合: .venv\Scripts\activate
+
 # 依存関係のインストール
 pip install -r requirements.txt
 
 # 環境変数の設定（.envファイルを作成）
-echo "OPENAI_API_KEY=your_openai_api_key_here" > .env
+cat > .env << EOF
+OPENAI_API_KEY=your_openai_api_key_here
+FLASK_ENV=development
+EOF
 
 # アプリケーションの起動
 python app.py
 ```
 
 その後、ブラウザで http://localhost:5014 にアクセスしてください。
+
+### 本番環境（Cloud Run）でのセットアップ
+
+#### 必要な環境変数
+Cloud Run のシークレット管理またはサービス環境変数で以下を設定してください：
+
+```bash
+# 必須
+OPENAI_API_KEY=your_openai_api_key_here
+FLASK_ENV=production
+GCP_PROJECT_ID=your-gcp-project-id
+GCS_BUCKET_NAME=science-buddy-logs
+
+# オプション
+PORT=8080  # デフォルト: 8080 (Cloud Run推奨)
+```
+
+#### GCS バケットの準備
+```bash
+# バケットの作成（存在しない場合）
+gsutil mb gs://science-buddy-logs/
+
+# 保存先フォルダの準備（Cloud Run 起動時に自動作成されます）
+# - gs://science-buddy-logs/logs/
+# - gs://science-buddy-logs/sessions/
+# - gs://science-buddy-logs/summaries/
+# - gs://science-buddy-logs/error_logs/
+```
+
+#### データの永続化戦略
+本番環境では以下の優先度でデータを保存します：
+
+1. **GCS（推奨）** - コンテナ再起動時も保持
+   - セッション: `gs://science-buddy-logs/sessions/{student_id}/{unit}/{stage}.json`
+   - サマリー: `gs://science-buddy-logs/summaries/{student_id}/{unit}/{stage}_summary.json`
+   - 学習ログ: `gs://science-buddy-logs/logs/learning_log_YYYYMMDD.json`
+   - エラーログ: `gs://science-buddy-logs/error_logs/error_log_YYYYMMDD.json`
+
+2. **ローカルストレージ** - 開発環境のみ
+   - GCS が利用不可の場合のフォールバック
+
+#### GCS 内のデータ確認
+
+```bash
+# バケット内の全ファイル一覧
+gsutil ls -r gs://science-buddy-logs/
+
+# 特定日付のログを確認
+gsutil cat gs://science-buddy-logs/logs/learning_log_20251120.json
+
+# データをローカルにダウンロード
+gsutil cp -r gs://science-buddy-logs/logs/* ./logs_backup/
+```
 
 ---
 
