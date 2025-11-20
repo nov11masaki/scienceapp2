@@ -1689,7 +1689,7 @@ body {
 .header-container {
     max-width: 1400px;
     margin: 0 auto;
-    padding: 30px 40px;
+    padding: 20px 40px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -1760,21 +1760,21 @@ body {
 .dashboard-main {
     max-width: 1400px;
     margin: 0 auto;
-    padding: 40px;
+    padding: 30px 40px;
 }
 
 /* 機能カード */
 .feature-cards {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 30px;
-    margin-bottom: 50px;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-bottom: 30px;
 }
 
 .feature-card {
     background: white;
     border-radius: 20px;
-    padding: 40px;
+    padding: 30px;
     text-align: center;
     box-shadow: 0 4px 20px rgba(0,0,0,0.08);
     transition: all 0.3s;
@@ -2945,20 +2945,6 @@ body {
 .lesson-plan-card:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-}
-
-.upload-area {
-    border: 2px dashed #dee2e6;
-    border-radius: 12px;
-    padding: 30px;
-    text-align: center;
-    background: #f8f9fa;
-    transition: all 0.3s ease;
-}
-
-.upload-area:hover {
-    border-color: #007bff;
-    background: #e7f3ff;
 }
 
 .lesson-plan-status-icon {

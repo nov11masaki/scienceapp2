@@ -16,7 +16,7 @@ import uuid
 import zipfile
 import tempfile
 from pathlib import Path
-from functools import lru_cache
+from functools import lru_cache, wraps
 from werkzeug.utils import secure_filename
 import numpy as np
 from sklearn.cluster import KMeans
@@ -54,17 +54,8 @@ ssl_context = ssl.create_default_context(cafile=certifi.where())
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'  # 本番環境では安全なキーに変更
 
-# ファイルアップロード設定
-UPLOAD_FOLDER = 'uploads'  # 一時的なアップロード用
-ALLOWED_EXTENSIONS = {'md', 'txt'}  # Markdownとテキストファイルのみ
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB制限
-
-# アップロードディレクトリが存在しない場合は作成
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
 def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'md', 'txt'}
 
 # 教員認証情報（実際の運用では環境変数やデータベースに保存）
 TEACHER_CREDENTIALS = {
@@ -165,11 +156,11 @@ def normalize_class_value_int(class_value):
 
 # 認証チェック用デコレータ
 def require_teacher_auth(f):
+    @wraps(f)
     def decorated_function(*args, **kwargs):
         if not session.get('teacher_authenticated'):
             return redirect(url_for('teacher_login'))
         return f(*args, **kwargs)
-    decorated_function.__name__ = f.__name__
     return decorated_function
 
 # セッション管理機能（ブラウザ閉鎖後の復帰対応）
@@ -2413,35 +2404,9 @@ def api_students_by_class():
     return jsonify(students_by_class)
 
 
-
-
-# ===== ノート写真ファイル配信 =====
-
-# ===== リセット機能 =====
-
-@app.route('/logs/note_photos/<path:path>')
-def serve_note_photos(path):
-    """ノート写真ファイルを配信"""
-    from flask import send_from_directory
-    try:
-        return send_from_directory(os.path.join('logs', 'note_photos'), path)
-    except Exception as e:
-        print(f"[ERROR] Failed to serve note photo: {e}")
-        return jsonify({'error': 'File not found'}), 404
-
-
-if __name__ == '__main__':
-    # 環境変数からポート番号を取得（CloudRun用）
-    port = int(os.environ.get('PORT', 5014))
-    # 本番環境ではdebug=False
-    debug_mode = os.environ.get('FLASK_ENV') != 'production'
-    app.run(host='0.0.0.0', port=port, debug=debug_mode)
-
-
 # ===== 分析機能 =====
 
 @app.route('/teacher/analysis_dashboard')
-@require_teacher_auth
 def analysis_dashboard():
     """教員用分析ダッシュボード"""
     return render_template('teacher/analysis_dashboard.html', units=UNITS)
@@ -2891,3 +2856,9 @@ def detect_patterns(messages):
     except Exception as e:
         print(f"[PATTERN_DETECTION] Error: {e}")
         return {}
+if __name__ == '__main__':
+    # 環境変数からポート番号を取得（CloudRun用）
+    port = int(os.environ.get('PORT', 5014))
+    # 本番環境ではdebug=False
+    debug_mode = os.environ.get('FLASK_ENV') != 'production'
+    app.run(host='0.0.0.0', port=port, debug=debug_mode)
