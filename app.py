@@ -868,7 +868,20 @@ def save_error_log(student_number, class_number, error_message, error_type, stag
         'additional_info': additional_info or {}
     }
     
-    _save_error_log_local(error_entry)
+    # GCSに保存
+    if USE_GCS and bucket:
+        try:
+            _save_error_log_gcs(error_entry)
+            print(f"[ERROR_LOG] GCS saved - {class_display}")
+        except Exception as e:
+            print(f"[ERROR_LOG] GCS save failed: {e}")
+    
+    # ローカルにも保存
+    try:
+        _save_error_log_local(error_entry)
+        print(f"[ERROR_LOG] Local saved - {class_display}")
+    except Exception as e:
+        print(f"[ERROR_LOG] Local save failed: {e}")
 
 def _save_error_log_local(error_entry):
     """エラーログをローカルファイルに保存"""
@@ -887,21 +900,67 @@ def _save_error_log_local(error_entry):
     
     with open(error_log_file, 'w', encoding='utf-8') as f:
         json.dump(logs, f, ensure_ascii=False, indent=2)
-    
-    print(f"[ERROR_LOG] Local saved: {error_entry['class_display']}")
+
+def _save_error_log_gcs(error_entry):
+    """エラーログをGCSに保存"""
+    try:
+        from google.cloud import storage
+        
+        date = datetime.now().strftime('%Y%m%d')
+        gcs_path = f"error_logs/error_log_{date}.json"
+        blob = bucket.blob(gcs_path)
+        
+        # 既存のエラーログを読み込み
+        logs = []
+        if blob.exists():
+            try:
+                content = blob.download_as_string().decode('utf-8')
+                logs = json.loads(content)
+            except:
+                logs = []
+        
+        # 新しいエラーを追加
+        logs.append(error_entry)
+        
+        # GCSに保存
+        blob.upload_from_string(
+            json.dumps(logs, ensure_ascii=False, indent=2),
+            content_type='application/json'
+        )
+        
+        print(f"[ERROR_LOG_GCS] {gcs_path} saved")
+    except Exception as e:
+        print(f"[ERROR_LOG_GCS] Error: {e}")
 
 def load_error_logs(date=None):
-    """エラーログを読み込み"""
+    """エラーログを読み込み（GCS/ローカル対応）"""
     if date is None:
         date = datetime.now().strftime('%Y%m%d')
     
+    # GCSから読み込み
+    if USE_GCS and bucket:
+        try:
+            gcs_path = f"error_logs/error_log_{date}.json"
+            blob = bucket.blob(gcs_path)
+            
+            if blob.exists():
+                content = blob.download_as_string().decode('utf-8')
+                logs = json.loads(content)
+                print(f"[ERROR_LOAD] GCS - {gcs_path} loaded ({len(logs)} entries)")
+                return logs
+        except Exception as e:
+            print(f"[ERROR_LOAD] GCS Error: {e}")
+    
+    # ローカルから読み込み
     error_log_file = f"logs/error_log_{date}.json"
     if not os.path.exists(error_log_file):
         return []
     
     try:
         with open(error_log_file, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            logs = json.load(f)
+            print(f"[ERROR_LOAD] Local - {error_log_file} loaded ({len(logs)} entries)")
+            return logs
     except (json.JSONDecodeError, FileNotFoundError):
         return []
 
