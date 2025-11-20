@@ -566,6 +566,11 @@ def call_openai_with_retry(prompt, max_retries=3, delay=2, unit=None, stage=None
         except Exception as e:
             error_msg = str(e)
             
+            print(f"[OPENAI_ERROR] attempt {attempt + 1}/{max_retries}: {error_msg}")
+            print(f"[OPENAI_ERROR] Full exception type: {type(e).__name__}")
+            import traceback
+            print(f"[OPENAI_ERROR] Traceback: {traceback.format_exc()}")
+            
             if "API_KEY" in error_msg.upper() or "invalid_api_key" in error_msg.lower():
                 return "APIキーの設定に問題があります。管理者に連絡してください。"
             elif "QUOTA" in error_msg.upper() or "LIMIT" in error_msg.upper() or "rate_limit_exceeded" in error_msg.lower():
@@ -578,6 +583,7 @@ def call_openai_with_retry(prompt, max_retries=3, delay=2, unit=None, stage=None
                 else:
                     return "ネットワーク接続に問題があります。インターネット接続を確認してください。"
             elif "400" in error_msg or "INVALID" in error_msg.upper():
+                print(f"[OPENAI_ERROR] 400/INVALID error detected, raw error: {e}")
                 return "リクエストの形式に問題があります。管理者に連絡してください。"
             elif "403" in error_msg or "PERMISSION" in error_msg.upper():
                 return "APIの利用権限に問題があります。管理者に連絡してください。"
@@ -1200,13 +1206,36 @@ def prediction():
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    user_message = request.json.get('message')
-    input_metadata = request.json.get('metadata', {})
-    
-    conversation = session.get('conversation', [])
-    unit = session.get('unit')
-    task_content = session.get('task_content')
-    student_number = session.get('student_number')
+    try:
+        # リクエストが JSON か確認
+        if request.content_type and 'application/json' not in request.content_type:
+            print(f"[ERROR] Content-Type error: {request.content_type}")
+            return jsonify({'error': 'Content-Type が application/json である必要があります'}), 400
+        
+        if not request.json:
+            print(f"[ERROR] No JSON in request body")
+            return jsonify({'error': 'リクエストボディが空です'}), 400
+        
+        user_message = request.json.get('message')
+        if not user_message:
+            print(f"[ERROR] No message in request")
+            return jsonify({'error': 'メッセージが指定されていません'}), 400
+            
+        input_metadata = request.json.get('metadata', {})
+        
+        conversation = session.get('conversation', [])
+        unit = session.get('unit')
+        task_content = session.get('task_content')
+        student_number = session.get('student_number')
+        
+        print(f"[CHAT] message: {user_message[:50]}...")
+        print(f"[CHAT] unit: {unit}, student: {student_number}")
+        print(f"[CHAT] conversation length: {len(conversation)}")
+    except Exception as e:
+        print(f"[ERROR] Request parsing error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'リクエスト解析エラー: {str(e)}'}), 400
     
     # 対話履歴に追加
     conversation.append({'role': 'user', 'content': user_message})
@@ -1267,11 +1296,14 @@ def chat():
             'suggest_summary': suggest_summary
         }
         
+        print(f"[CHAT] AI response success, user_messages: {user_messages_count}")
         return jsonify(response_data)
         
     except Exception as e:
         import traceback
-        traceback.print_exc()
+        error_trace = traceback.format_exc()
+        print(f"[ERROR] Chat error: {e}")
+        print(f"[ERROR] Traceback:\n{error_trace}")
         return jsonify({'error': f'AI接続エラーが発生しました。しばらく待ってから再度お試しください。'}), 500
 
 @app.route('/report_error', methods=['POST'])

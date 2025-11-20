@@ -624,11 +624,11 @@ body {
 /* 課題セクション - 親しみやすく */
 .task-card {
     background: var(--white-color);
-    border: 2px solid var(--primary-color);
-    border-radius: var(--border-radius);
-    padding: 12px;
+    border: 1.5px solid var(--primary-color);
+    border-radius: 8px;
+    padding: 8px;
     box-shadow: var(--shadow-light);
-    margin-bottom: 10px;
+    margin-bottom: 4px;
     position: relative;
     overflow: hidden;
 }
@@ -639,24 +639,24 @@ body {
     top: 0;
     left: 0;
     right: 0;
-    height: 3px;
+    height: 2px;
     background: var(--primary-color);
 }
 
 .task-title {
     color: var(--primary-color);
     font-weight: 700;
-    margin-bottom: 8px;
+    margin-bottom: 4px;
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 1rem;
+    gap: 6px;
+    font-size: 0.9rem;
 }
 
 .task-content {
     margin: 0;
-    font-size: 0.95rem;
-    line-height: 1.5;
+    font-size: 0.88rem;
+    line-height: 1.4;
 }
 
 /* 実験フォームのスタイル */
@@ -922,7 +922,7 @@ body {
 
 .message {
     display: flex;
-    margin-bottom: 20px;
+    margin-bottom: 8px;
     animation: fadeIn 0.4s ease-in;
 }
 
@@ -932,14 +932,14 @@ body {
 }
 
 .message-avatar {
-    width: 42px;
-    height: 42px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.2rem;
-    margin-right: 12px;
+    font-size: 1rem;
+    margin-right: 8px;
     flex-shrink: 0;
     position: relative;
     box-shadow: 0 2px 8px rgba(0,0,0,0.12);
@@ -1075,12 +1075,12 @@ body {
 
 .message-content {
     background: #f8f9fa;
-    padding: 14px 18px;
-    border-radius: 18px;
+    padding: 8px 12px;
+    border-radius: 12px;
     max-width: 70%;
-    line-height: 1.5;
-    font-size: 0.95rem;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    line-height: 1.4;
+    font-size: 0.9rem;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
     border: none;
     position: relative;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -3437,21 +3437,32 @@ body {
 
 /* 上半分: チャット画面 */
 .chat-section {
-    height: 55vh;  /* 55%に調整 */
+    height: 50vh;  /* 50%に調整 */
     display: flex;
     flex-direction: column;
-    padding: 8px;
+    padding: 6px;
     background: var(--white-color);
-    border-bottom: 3px solid var(--primary-color);
+    border-bottom: 2px solid var(--primary-color);
     overflow: hidden;
 }
 
 .chat-section .chat-header {
     flex-shrink: 0;
+    padding-bottom: 4px;
+}
+
+.chat-section .chat-header h2 {
+    font-size: 1.1rem;
+    margin-bottom: 4px;
 }
 
 .chat-section .task-section {
     flex-shrink: 0;
+    margin-bottom: 4px;
+}
+
+.chat-section .task-section .task-card {
+    padding: 8px;
 }
 
 .chat-section .chat-container {
@@ -3474,7 +3485,7 @@ body {
     background: transparent;
     border-top: none;
     border-radius: 0;
-    margin: 8px 0 0 0;
+    margin: 4px 0 0 0;
     display: flex;
     flex-direction: row;
     align-items: flex-end;
@@ -3487,11 +3498,11 @@ body {
 }
 
 .chat-input-area textarea {
-    font-size: 1rem;
+    font-size: 0.95rem;
     resize: none;
     border: none;
     border-radius: 18px;
-    padding: 10px 15px;
+    padding: 8px 12px;
     background: var(--primary-color);
     color: white;
     box-shadow: 0 2px 6px rgba(79, 195, 247, 0.2);
@@ -3518,7 +3529,7 @@ body {
 
 /* 下半分: 入力補助エリア */
 .input-assist-section {
-    height: 45vh;  /* 45%に調整 */
+    height: 50vh;  /* 50%に調整 */
     display: flex;
     flex-direction: column;
     padding: 4px;  /* パディングを小さく */
@@ -3529,12 +3540,12 @@ body {
 
 /* 50音表がOFFの時：入力補助エリアを縮小し、トーク画面の領域を増やす */
 .input-assist-section.keyboard-off {
-    height: 12vh;  /* トーク画面の領域を増やすため、入力補助エリアを縮小 */
+    height: 10vh;  /* トーク画面の領域を増やすため、入力補助エリアを縮小 */
     opacity: 0.85;
 }
 
 .input-assist-section.keyboard-on {
-    height: 45vh;
+    height: 50vh;
 }
 
 .input-assist-header {
@@ -3583,22 +3594,35 @@ body {
 /* 入力コントロールエリア（固定高さ） */
 .input-controls-area {
     flex-shrink: 0;
-    padding: 2px 0;  /* パディングを最小限に */
+    padding: 2px;  /* パディングを最小限に */
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
 .input-controls-area .btn {
-    font-size: 0.75rem;  /* ボタンのフォントサイズをさらに小さく */
-    padding: 4px 8px;  /* パディングをさらに小さく */
+    font-size: 0.7rem;  /* ボタンのフォントサイズをさらに小さく */
+    padding: 3px 6px;  /* パディングをさらに小さく */
     font-weight: 600;
+    line-height: 1.2;
+}
+
+.input-controls-area .d-flex {
+    gap: 2px;
 }
 
 .input-controls-area .voice-input-section {
-    margin-bottom: 2px;  /* マージンを小さく */
+    margin-bottom: 0;  /* マージンを削除 */
 }
 
 .input-controls-area .voice-input-section .btn {
-    font-size: 0.75rem;
-    padding: 5px;
+    font-size: 0.7rem;
+    padding: 3px 6px;
+}
+
+.input-controls-area .voice-input-status {
+    display: none;
+    margin-top: 2px;
 }
 
 /* 50音表キーボードのスタイル調整 */
