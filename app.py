@@ -167,7 +167,7 @@ def require_teacher_auth(f):
 SESSION_STORAGE_FILE = 'session_storage.json'
 
 def save_session_to_db(student_id, unit, stage, conversation_data):
-    """セッションデータをデータベースに保存（GCS/ローカルハイブリッド）"""
+    """セッションデータをデータベースに保存（GCS優先、ローカルはフォールバック）"""
     session_entry = {
         'timestamp': datetime.now().isoformat(),
         'student_id': student_id,
@@ -176,12 +176,17 @@ def save_session_to_db(student_id, unit, stage, conversation_data):
         'conversation': conversation_data
     }
     
-    # ローカルに保存（常に実施）
-    _save_session_local(session_entry)
-    
-    # GCSに保存（本番環境）
+    # 本番環境: GCS優先
     if USE_GCS and bucket:
-        _save_session_gcs(session_entry)
+        try:
+            _save_session_gcs(session_entry)
+            print(f"[SESSION_SAVE] GCS - {student_id}_{unit}_{stage}")
+            return  # GCS保存成功したらローカル保存は不要
+        except Exception as e:
+            print(f"[SESSION_SAVE] GCS failed: {e}, falling back to local")
+    
+    # 開発環境またはGCS失敗時: ローカル保存
+    _save_session_local(session_entry)
 
 def _save_session_local(session_entry):
     """セッションをローカルファイルに保存"""
@@ -224,15 +229,22 @@ def _save_session_gcs(session_entry):
         print(f"[SESSION_SAVE] GCS Error: {e}")
 
 def load_session_from_db(student_id, unit, stage):
-    """セッションデータをデータベースから復元（GCS/ローカルハイブリッド）"""
-    # GCSから読み込み（本番環境）
+    """セッションデータをデータベースから復元（GCS優先）"""
+    # 本番環境: GCS優先
     if USE_GCS and bucket:
-        conversation = _load_session_gcs(student_id, unit, stage)
-        if conversation is not None:
-            return conversation
+        try:
+            conversation = _load_session_gcs(student_id, unit, stage)
+            if conversation is not None:
+                print(f"[SESSION_LOAD] GCS - {student_id}_{unit}_{stage}")
+                return conversation
+        except Exception as e:
+            print(f"[SESSION_LOAD] GCS failed: {e}, trying local")
     
-    # ローカルから読み込み
-    return _load_session_local(student_id, unit, stage)
+    # 開発環境またはGCS失敗時: ローカルから読み込み
+    conversation = _load_session_local(student_id, unit, stage)
+    if conversation:
+        print(f"[SESSION_LOAD] Local - {student_id}_{unit}_{stage}")
+    return conversation
 
 def _load_session_local(student_id, unit, stage):
     """セッションをローカルファイルから復元"""
@@ -725,13 +737,13 @@ def save_learning_log(student_number, unit, log_type, data, class_number=None):
         'data': data
     }
     
-    if USE_GCS:
-        # GCS に保存
+    if USE_GCS and bucket:
+        # 本番環境: GCS優先
         try:
             log_date = datetime.now().strftime('%Y%m%d')
             log_filename = f"logs/learning_log_{log_date}.json"
             
-            print(f"[GCS_SAVE] START - path: {log_filename}, class: {class_display}, unit: {unit}, type: {log_type}")
+            print(f"[LOG_SAVE] GCS START - path: {log_filename}, class: {class_display}, unit: {unit}, type: {log_type}")
             
             # GCS からファイルを読み込み
             blob = bucket.blob(log_filename)
@@ -750,70 +762,70 @@ def save_learning_log(student_number, unit, log_type, data, class_number=None):
                 json.dumps(logs, ensure_ascii=False, indent=2).encode('utf-8'),
                 content_type='application/json'
             )
-            print(f"[GCS_SAVE] SUCCESS - saved to GCS")
+            print(f"[LOG_SAVE] GCS SUCCESS - saved to GCS")
+            return  # GCS成功したらローカル保存は不要
         except Exception as e:
-            print(f"[GCS_SAVE] ERROR - {type(e).__name__}: {str(e)}")
+            print(f"[LOG_SAVE] GCS ERROR - {type(e).__name__}: {str(e)}, falling back to local")
             import traceback
             traceback.print_exc()
-    else:
-        # ローカルファイルに保存
-        log_filename = f"learning_log_{datetime.now().strftime('%Y%m%d')}.json"
-        os.makedirs('logs', exist_ok=True)
-        log_file = f"logs/{log_filename}"
-        
-        logs = []
-        if os.path.exists(log_file):
-            try:
-                with open(log_file, 'r', encoding='utf-8') as f:
-                    logs = json.load(f)
-            except (json.JSONDecodeError, FileNotFoundError):
-                logs = []
-        
-        logs.append(log_entry)
-        
-        with open(log_file, 'w', encoding='utf-8') as f:
-            json.dump(logs, f, ensure_ascii=False, indent=2)
+    
+    # 開発環境またはGCS失敗時: ローカルファイルに保存
+    log_filename = f"learning_log_{datetime.now().strftime('%Y%m%d')}.json"
+    os.makedirs('logs', exist_ok=True)
+    log_file = f"logs/{log_filename}"
+    
+    logs = []
+    if os.path.exists(log_file):
+        try:
+            with open(log_file, 'r', encoding='utf-8') as f:
+                logs = json.load(f)
+        except (json.JSONDecodeError, FileNotFoundError):
+            logs = []
+    
+    logs.append(log_entry)
+    
+    with open(log_file, 'w', encoding='utf-8') as f:
+        json.dump(logs, f, ensure_ascii=False, indent=2)
 
 # 学習ログを読み込む関数
 def load_learning_logs(date=None):
-    """指定日の学習ログを読み込み（GCSまたはローカル）"""
+    """指定日の学習ログを読み込み（GCS優先）"""
     if date is None:
         date = datetime.now().strftime('%Y%m%d')
     
-    if USE_GCS:
+    # 本番環境: GCS優先
+    if USE_GCS and bucket:
         # GCS から読み込み
         try:
             log_filename = f"logs/learning_log_{date}.json"
-            print(f"[GCS_LOAD] START - loading logs from: {log_filename}")
+            print(f"[LOG_LOAD] GCS START - loading logs from: {log_filename}")
             
             blob = bucket.blob(log_filename)
             try:
                 content = blob.download_as_string()
                 logs = json.loads(content.decode('utf-8'))
                 log_count = len(logs)
-                print(f"[GCS_LOAD] SUCCESS - loaded {log_count} logs from {date}")
+                print(f"[LOG_LOAD] GCS SUCCESS - loaded {log_count} logs from {date}")
                 return logs
             except Exception as e:
-                print(f"[GCS_LOAD] File not found: {log_filename}")
-                return []
+                print(f"[LOG_LOAD] GCS file not found: {log_filename}")
         except Exception as e:
-            print(f"[GCS_LOAD] ERROR - {type(e).__name__}: {str(e)}")
+            print(f"[LOG_LOAD] GCS ERROR - {type(e).__name__}: {str(e)}")
             import traceback
             traceback.print_exc()
-            return []
-    else:
-        # ローカルファイルから読み込み
-        log_filename = f"learning_log_{date}.json"
-        log_file = f"logs/{log_filename}"
-        
-        if not os.path.exists(log_file):
-            return []
-        
-        try:
-            with open(log_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, FileNotFoundError):
-            return []
+    
+    # 開発環境またはGCS失敗時: ローカルファイルから読み込み
+    log_filename = f"learning_log_{date}.json"
+    log_file = f"logs/{log_filename}"
+    
+    if not os.path.exists(log_file):
+        return []
+    
+    try:
+        with open(log_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, FileNotFoundError):
+        return []
 
 def get_available_log_dates():
     """利用可能な全ログの日付リストを取得"""
@@ -933,11 +945,11 @@ def _save_error_log_gcs(error_entry):
         print(f"[ERROR_LOG_GCS] Error: {e}")
 
 def load_error_logs(date=None):
-    """エラーログを読み込み（GCS/ローカル対応）"""
+    """エラーログを読み込み（GCS優先）"""
     if date is None:
         date = datetime.now().strftime('%Y%m%d')
     
-    # GCSから読み込み
+    # 本番環境: GCS優先
     if USE_GCS and bucket:
         try:
             gcs_path = f"error_logs/error_log_{date}.json"
@@ -948,10 +960,12 @@ def load_error_logs(date=None):
                 logs = json.loads(content)
                 print(f"[ERROR_LOAD] GCS - {gcs_path} loaded ({len(logs)} entries)")
                 return logs
+            else:
+                print(f"[ERROR_LOAD] GCS - {gcs_path} not found, trying local")
         except Exception as e:
-            print(f"[ERROR_LOAD] GCS Error: {e}")
+            print(f"[ERROR_LOAD] GCS Error: {e}, trying local")
     
-    # ローカルから読み込み
+    # 開発環境またはGCS失敗時: ローカルから読み込み
     error_log_file = f"logs/error_log_{date}.json"
     if not os.path.exists(error_log_file):
         return []
@@ -1624,21 +1638,22 @@ def get_session():
         }), 500
 
 def _save_summary_to_db(student_id, unit, stage, summary_text):
-    """サマリーを永続ストレージに保存（GCS/ローカル）"""
-    # GCSに保存
+    """サマリーを永続ストレージに保存（GCS優先、ローカルはフォールバック）"""
+    # 本番環境: GCS優先
     if USE_GCS and bucket:
         try:
             _save_summary_gcs(student_id, unit, stage, summary_text)
-            print(f"[SUMMARY_SAVE] GCS saved - {student_id}_{unit}_{stage}")
+            print(f"[SUMMARY_SAVE] GCS - {student_id}_{unit}_{stage}")
+            return  # GCS保存成功したらローカル保存は不要
         except Exception as e:
-            print(f"[SUMMARY_SAVE] GCS save failed: {e}")
+            print(f"[SUMMARY_SAVE] GCS failed: {e}, falling back to local")
     
-    # ローカルにも保存
+    # 開発環境またはGCS失敗時: ローカル保存
     try:
         _save_summary_local(student_id, unit, stage, summary_text)
-        print(f"[SUMMARY_SAVE] Local saved - {student_id}_{unit}_{stage}")
+        print(f"[SUMMARY_SAVE] Local - {student_id}_{unit}_{stage}")
     except Exception as e:
-        print(f"[SUMMARY_SAVE] Local save failed: {e}")
+        print(f"[SUMMARY_SAVE] Local failed: {e}")
 
 def _save_summary_local(student_id, unit, stage, summary_text):
     """サマリーをローカルファイルに保存"""
@@ -1699,15 +1714,22 @@ def _save_summary_gcs(student_id, unit, stage, summary_text):
         print(f"[SUMMARY_SAVE_GCS] Error: {e}")
 
 def _load_summary_from_db(student_id, unit, stage):
-    """サマリーをデータベースから取得（GCS/ローカル）"""
-    # GCSから取得
+    """サマリーをデータベースから取得（GCS優先）"""
+    # 本番環境: GCS優先
     if USE_GCS and bucket:
-        summary = _load_summary_gcs(student_id, unit, stage)
-        if summary is not None:
-            return summary
+        try:
+            summary = _load_summary_gcs(student_id, unit, stage)
+            if summary is not None:
+                print(f"[SUMMARY_LOAD] GCS - {student_id}_{unit}_{stage}")
+                return summary
+        except Exception as e:
+            print(f"[SUMMARY_LOAD] GCS failed: {e}, trying local")
     
-    # ローカルから取得
-    return _load_summary_local(student_id, unit, stage)
+    # 開発環境またはGCS失敗時: ローカルから取得
+    summary = _load_summary_local(student_id, unit, stage)
+    if summary:
+        print(f"[SUMMARY_LOAD] Local - {student_id}_{unit}_{stage}")
+    return summary
 
 def _load_summary_local(student_id, unit, stage):
     """サマリーをローカルファイルから取得"""
