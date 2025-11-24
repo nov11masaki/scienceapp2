@@ -86,5 +86,25 @@
         "content": "「▌"
       }
     ]
+  },
+  "5_29_水を冷やし続けた時の温度と様子_prediction": {
+    "timestamp": "2025-11-20T22:19:42.122496",
+    "student_id": "5_29",
+    "unit": "水を冷やし続けた時の温度と様子",
+    "stage": "prediction",
+    "conversation": [
+      {
+        "role": "assistant",
+        "content": "\n                            水を冷やし続けると、どうなると思う？\n                        "
+      },
+      {
+        "role": "user",
+        "content": "わからん"
+      },
+      {
+        "role": "assistant",
+        "content": "わ▌"
+      }
+    ]
   }
 }

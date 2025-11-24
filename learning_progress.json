@@ -22,6 +22,29 @@
       },
       "conversation_history": [],
       "reflection_conversation_history": []
+    },
+    "水を冷やし続けた時の温度と様子": {
+      "current_stage": "prediction",
+      "last_access": "2025-11-20T22:19:31.942130",
+      "stage_progress": {
+        "prediction": {
+          "started": false,
+          "conversation_count": 0,
+          "summary_created": false,
+          "last_message": ""
+        },
+        "experiment": {
+          "started": false,
+          "completed": false
+        },
+        "reflection": {
+          "started": false,
+          "conversation_count": 0,
+          "summary_created": false
+        }
+      },
+      "conversation_history": [],
+      "reflection_conversation_history": []
     }
   }
 }

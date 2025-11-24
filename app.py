@@ -506,7 +506,7 @@ def extract_message_from_json_response(response):
         return response
 
 # APIコール用のリトライ関数
-def call_openai_with_retry(prompt, max_retries=3, delay=2, unit=None, stage=None, model_override=None, enable_cache=False):
+def call_openai_with_retry(prompt, max_retries=3, delay=2, unit=None, stage=None, model_override=None, enable_cache=False, temperature=None):
     """OpenAI APIを呼び出し、エラー時はリトライする
     
     Args:
@@ -517,6 +517,7 @@ def call_openai_with_retry(prompt, max_retries=3, delay=2, unit=None, stage=None
         stage: 学習段階
         model_override: モデルオーバーライド
         enable_cache: プロンプトキャッシング有効化（システムメッセージに対して有効）
+        temperature: 生成の多様性パラメータ (指定がない場合はstageから自動決定)
     """
     if client is None:
         return "AI システムの初期化に問題があります。管理者に連絡してください。"
@@ -539,15 +540,16 @@ def call_openai_with_retry(prompt, max_retries=3, delay=2, unit=None, stage=None
             import time
             start_time = time.time()
             
-            # stage（学習段階）に応じてtemperatureを設定
-            # 予想段階: より創造的で多様な回答 (1.0)
-            # 考察段階: より創造的で多様な回答 (1.0) - 実験後の新しい気づきを促す
-            if stage == 'prediction':
-                temperature = 1.0
-            elif stage == 'reflection':
-                temperature = 1.0  # 実験結果との比較から新しい視点を引き出すため
-            else:
-                temperature = 0.5  # デフォルト
+            # temperatureが指定されていない場合、stage（学習段階）に応じて設定
+            if temperature is None:
+                # 予想段階: より創造的で多様な回答 (1.0)
+                # 考察段階: より創造的で多様な回答 (1.0) - 実験後の新しい気づきを促す
+                if stage == 'prediction':
+                    temperature = 1.0
+                elif stage == 'reflection':
+                    temperature = 1.0  # 実験結果との比較から新しい視点を引き出すため
+                else:
+                    temperature = 0.5  # デフォルト
             
             model_name = model_override if model_override else "gpt-4o-mini"
 
@@ -2702,7 +2704,7 @@ def generate_insights(prediction_messages, reflection_messages, text_analysis, u
         if exp_refs > 0:
             insights.append(
                 f"【日常経験との結びつき】\n"
-                f"予想段階で{exp_refs}回、児童の日常経験が参照されました。\n"
+                f"予想段階で{exp_refs}回、児童の過去の経験が参照されました。\n"
                 f"児童が既有知識と新しい学習を結びつけようとしていることが分かります。"
             )
         
@@ -2906,9 +2908,11 @@ def detect_patterns(messages):
     except Exception as e:
         print(f"[PATTERN_DETECTION] Error: {e}")
         return {}
+
+
 if __name__ == '__main__':
     # 環境変数からポート番号を取得（CloudRun用）
     port = int(os.environ.get('PORT', 5014))
     # 本番環境ではdebug=False
     debug_mode = os.environ.get('FLASK_ENV') != 'production'
-    app.run(host='0.0.0.0', port=port, debug=debug_mode)
+    app.run(debug=debug_mode, host='0.0.0.0', port=port)
