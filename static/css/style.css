@@ -2800,24 +2800,7 @@ body {
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
-.voice-input-status {
-    animation: fadeIn 0.3s ease;
-}
-
-@keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-/* 音声入力ボタンのアニメーション */
-#voiceInputBtn.btn-danger {
-    animation: pulse-red 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse-red {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(210, 23, 13, 0.7); }
-    50% { box-shadow: 0 0 0 10px rgba(210, 23, 13, 0); }
-}
+/* 音声入力は廃止されました（関連スタイルを削除） */
 
 /* レスポンシブ対応 */
 @media (max-width: 992px) {
@@ -3039,19 +3022,7 @@ body {
     gap: 2px;
 }
 
-.input-controls-area .voice-input-section {
-    margin-bottom: 0;  /* マージンを削除 */
-}
-
-.input-controls-area .voice-input-section .btn {
-    font-size: 0.7rem;
-    padding: 3px 6px;
-}
-
-.input-controls-area .voice-input-status {
-    display: none;
-    margin-top: 2px;
-}
+/* 音声入力セクションは削除済み */
 
 /* 50音表キーボードのスタイル調整 */
 .keyboard-area .touch-keyboard-panel,
@@ -3390,15 +3361,7 @@ body {
     display: none;
 }
 
-/* 音声入力セクション */
-#voiceInputSection {
-    display: none;
-}
-
-/* 音声入力ステータス */
-#voiceInputStatus {
-    display: none;
-}
+/* 音声入力関連スタイルは削除 */
 
 /* ボタンコンテナ */
 .button-container-top-right {

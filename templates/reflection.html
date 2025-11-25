@@ -109,12 +109,7 @@
                                 50音表
                             </label>
                         </div>
-                        <div class="form-check form-switch d-inline-block">
-                            <input class="form-check-input" type="checkbox" id="toggleVoice">
-                            <label class="form-check-label" for="toggleVoice">
-                                音声入力
-                            </label>
-                        </div>
+                        <!-- 音声入力トグル（削除） -->
                     </div>
                 </div>
             </div>
@@ -128,21 +123,8 @@
                 </div>
             </div>
             
-            <!-- 入力コントロールエリア -->
+                <!-- 入力コントロールエリア -->
             <div class="input-controls-area">
-                <!-- 音声入力ボタン -->
-                <div class="voice-input-section mb-2" id="voiceInputSection">
-                    <button class="btn btn-outline-primary w-100" id="voiceInputBtn">
-                        <i class="fas fa-microphone"></i> 音声で入力
-                    </button>
-                    <div class="voice-input-status mt-2" id="voiceInputStatus">
-                        <div class="alert alert-info mb-0 py-2">
-                            <i class="fas fa-microphone"></i>
-                            <span id="voiceStatusText">音声を認識中...</span>
-                        </div>
-                    </div>
-                </div>
-                
                 <!-- キーボードコントロールボタン -->
                 <div class="d-flex gap-2">
                     <button class="btn btn-warning flex-fill" id="backspaceBtn">
@@ -152,14 +134,11 @@
                         <i class="fas fa-times"></i> 全消去
                     </button>
                 </div>
-                
-                <!-- 考察まとめボタンと単元選択に戻るボタン -->
+
+                <!-- 考察まとめボタン -->
                 <div class="d-flex gap-2 mt-3">
                     <button class="btn btn-success flex-fill" id="reflectionSummaryBtn" onclick="getSummary()">
                         <i class="fas fa-check me-2"></i>考察をまとめる
-                    </button>
-                    <button class="btn btn-secondary flex-fill" id="reflectionBackBtn" onclick="goBackToUnitSelectionFromReflection()">
-                        <i class="fas fa-arrow-left me-2"></i>単元を選択
                     </button>
                 </div>
             </div>
@@ -171,14 +150,19 @@
 {% block scripts %}
 <!-- 考察完了情報をJSONとして埋め込み -->
 <script type="application/json" id="reflection-status">
+{
+    "reflection_summary_created": {{ reflection_summary_created | tojson | safe }},
+    "reflectionSummary": {{ session.get('reflection_summary', '') | tojson | safe }}
+}
+</script>
+
 <!-- 復帰情報を埋め込み -->
 <script type="application/json" id="reflection-resumption">
 {{ reflection_resumption_info | tojson | safe }}
 </script>
 
 <script>
-// グローバル変数: 音声認識インスタンス
-let recognition = null;
+// 音声入力は廃止（関連処理を削除）
 
 let reflectionConversationCount = 0;
 let lastMessage = '';
@@ -275,18 +259,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // 音声入力ボタンのイベントリスナーを設定
-    const voiceInputBtn = document.getElementById('voiceInputBtn');
-    console.log('voiceInputBtn要素:', voiceInputBtn);
-    if (voiceInputBtn) {
-        voiceInputBtn.addEventListener('click', function() {
-            console.log('voiceInputBtnがクリックされました');
-            startVoiceInput();
-        });
-        console.log('voiceInputBtnにイベントリスナーを設定しました');
-    } else {
-        console.error('voiceInputBtn要素が見つかりません');
-    }
+    // 音声入力は廃止（ボタンは削除済み）
     
     // キーボードコントロールボタン（タッチキーボード用）
     const backspaceBtn = document.getElementById('backspaceBtn');
@@ -334,6 +307,25 @@ document.addEventListener('DOMContentLoaded', function() {
     const summaryBtn = document.getElementById('summaryButton');
     if (summaryBtn) {
         summaryBtn.addEventListener('click', getSummary);
+    }
+
+    // 入力欄にフォーカスが当たったらスクロールを調整
+    const inputElR = document.getElementById('messageInput');
+    if (inputElR) {
+        inputElR.addEventListener('focus', ensureInputVisible);
+    }
+
+    // リサイズ時にスクロールを調整
+    window.addEventListener('resize', function() {
+        setTimeout(ensureInputVisible, 120);
+    });
+
+    // 50音表トグル時にも調整
+    const toggle50onSwitchR = document.getElementById('toggle50on');
+    if (toggle50onSwitchR) {
+        toggle50onSwitchR.addEventListener('change', function() {
+            setTimeout(ensureInputVisible, 100);
+        });
     }
 });
 
@@ -413,17 +405,17 @@ function restoreConversationFromLocalStorage() {
             
             // ユーザーメッセージをカウント
             if (msg.role === 'user') {
-                reflectionExchangeCount++;
+                reflectionConversationCount++;
             }
         });
-        
-        console.log('【DEBUG】考察履歴復元完了. reflectionExchangeCount:', reflectionExchangeCount);
-        
+
+        console.log('【DEBUG】考察履歴復元完了. reflectionConversationCount:', reflectionConversationCount);
+
         // スクロールを最下部に
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        
+
         // ユーザーメッセージ数に基づいてボタン表示判定
-        const totalMessages = reflectionExchangeCount * 2;
+        const totalMessages = reflectionConversationCount * 2;
         if (totalMessages >= 6) {
             showFinalSummaryButton('復元時のメッセージ数確認');
         }
@@ -538,217 +530,11 @@ function insertText(text) {
     input.focus();
 }
 
-// 入力補助の表示切り替え
+// 入力補助の表示切り替え（音声関連は削除）
 function toggleInputAssist(enabled) {
     const keyboardDiv = document.getElementById('touchKeyboard');
-    const voiceDiv = document.getElementById('voiceInputSection');
-    
-    if (enabled) {
-        keyboardDiv.style.display = 'block';
-        voiceDiv.style.display = 'block';
-    } else {
-        keyboardDiv.style.display = 'none';
-        voiceDiv.style.display = 'none';
-        stopVoiceInput();
-    }
-}
-
-// 音声入力開始/停止
-function startVoiceInput() {
-    console.log('音声入力ボタンがクリックされました');
-    
-    // 既に認識中なら停止
-    if (recognition && recognition.isListening) {
-        console.log('音声認識を停止します');
-        stopVoiceInput();
-        return;
-    }
-    
-    // Web Speech API のサポート確認
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-        const isEdge = navigator.userAgent.includes('Edg');
-        if (isEdge) {
-            alert('お使いの Edge ブラウザでは音声入力が対応していない可能性があります。\nChrome または Safari をお使いください。');
-        } else {
-            alert('お使いのブラウザは音声入力に対応していません。Chrome、Edge、Safari をお使いください。');
-        }
-        console.error('Web Speech API not supported');
-        return;
-    }
-    
-    console.log('Web Speech API サポート確認OK');
-    
-    // 本番環境対応: getUserMedia を先制取得してマイク権限を確認
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        console.log('getUserMedia をリクエスト中...');
-        navigator.mediaDevices.getUserMedia({ audio: true })
-            .then(function(stream) {
-                console.log('マイクアクセス許可取得');
-                // ストリームを停止（音声認識が自動的に使用）
-                stream.getTracks().forEach(track => track.stop());
-                // マイクアクセス許可後に音声認識を開始
-                initializeVoiceRecognition();
-            })
-            .catch(function(error) {
-                console.error('getUserMedia エラー:', error.name, error.message);
-                if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-                    alert('マイクの使用が許可されていません。ブラウザの設定を確認してください。');
-                } else if (error.name === 'NotFoundError') {
-                    alert('マイクが見つかりません。');
-                } else {
-                    alert('マイクアクセスエラー: ' + error.message);
-                }
-            });
-    } else {
-        // getUserMedia がない場合は直接音声認識を開始
-        console.log('getUserMedia がないため、直接音声認識を開始します');
-        initializeVoiceRecognition();
-    }
-}
-
-// 音声認識の初期化と開始
-function initializeVoiceRecognition() {
-    try {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        recognition = new SpeechRecognition();
-        
-        // 言語設定（Edge対応: 複数の形式を試す）
-        const browserLang = navigator.language || navigator.userLanguage;
-        if (browserLang && browserLang.startsWith('ja')) {
-            recognition.lang = 'ja-JP';
-        } else if (browserLang && browserLang.startsWith('ja-JP')) {
-            recognition.lang = 'ja-JP';
-        } else {
-            // デフォルト日本語
-            recognition.lang = 'ja-JP';
-        }
-        
-        recognition.continuous = true;  // 継続的に認識
-        recognition.interimResults = true;  // 途中結果も取得
-        recognition.maxAlternatives = 1;  // 最大候補数
-        
-        console.log('SpeechRecognition オブジェクト作成完了', {lang: recognition.lang, browser: navigator.userAgent.includes('Edg') ? 'Edge' : 'Other'});
-        
-        const statusDiv = document.getElementById('voiceInputStatus');
-        const statusText = document.getElementById('voiceStatusText');
-        const voiceBtn = document.getElementById('voiceInputBtn');
-        const input = document.getElementById('messageInput');
-        
-        // 認識開始時の入力欄の位置を記憶
-        let startPosition = 0;
-        
-        console.log('DOM要素取得:', {statusDiv, statusText, voiceBtn});
-        
-        recognition.onstart = function() {
-            console.log('音声認識開始');
-            recognition.isListening = true;
-            startPosition = input.value.length;  // 現在の入力位置を記憶
-            statusDiv.style.display = 'block';
-            statusText.textContent = '音声を認識中...';
-            voiceBtn.innerHTML = '<i class="fas fa-stop"></i> 停止';
-            voiceBtn.classList.add('btn-danger');
-            voiceBtn.classList.remove('btn-outline-primary');
-        };
-        
-        recognition.onresult = function(event) {
-            console.log('🎤 onresult イベント:', {resultIndex: event.resultIndex, resultsLength: event.results.length});
-            
-            let interimTranscript = '';
-            let finalTranscript = '';
-            
-            // 前回の確定結果からの新しい結果のみを処理
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-                const transcript = event.results[i][0].transcript;
-                const isFinal = event.results[i].isFinal;
-                const confidence = event.results[i][0].confidence;
-                
-                console.log(`結果[${i}]:`, {transcript, isFinal, confidence});
-                
-                if (isFinal) {
-                    finalTranscript += transcript + ' ';
-                } else {
-                    interimTranscript += transcript;
-                }
-            }
-            
-            // 入力欄を更新（確定結果のみを追加）
-            if (finalTranscript.trim()) {
-                console.log('✅ 確定結果を追加:', finalTranscript);
-                // 確定した結果のみを追加（余分なスペースを削除）
-                const cleanedFinalTranscript = finalTranscript.trim();
-                input.value += cleanedFinalTranscript + ' ';
-                console.log('入力欄の内容:', input.value);
-                startPosition = input.value.length;  // 新しい開始位置を更新
-                statusText.textContent = '✅ 認識完了: ' + cleanedFinalTranscript;
-            }
-            
-            // 途中結果の表示（ステータスのみ）
-            if (interimTranscript) {
-                statusText.textContent = '🎤 認識中: ' + interimTranscript;
-                console.log('途中結果:', interimTranscript);
-            }
-            
-            // 入力欄のスクロール位置をカーソル位置に合わせる
-            input.focus();
-            input.scrollTop = input.scrollHeight;
-        };
-        
-        recognition.onerror = function(event) {
-            console.error('音声認識エラー:', event.error);
-            const isEdge = navigator.userAgent.includes('Edg');
-            
-            statusDiv.style.display = 'none';
-            voiceBtn.innerHTML = '<i class="fas fa-microphone"></i> 音声で入力';
-            voiceBtn.classList.remove('btn-danger');
-            voiceBtn.classList.add('btn-outline-primary');
-            recognition.isListening = false;
-            
-            if (event.error === 'no-speech') {
-                alert('音声が検出されませんでした。もう一度お試しください。\n\n本番環境の場合:\n1. ページを https で開いているか確認\n2. マイクのプライバシー設定を確認\n3. 別のアプリがマイクを使用していないか確認');
-            } else if (event.error === 'not-allowed' || event.error === 'permission-denied') {
-                if (isEdge) {
-                    alert('Edge ブラウザでマイクの使用が許可されていません。\n1. ブラウザ設定で[プライバシー]→[カメラとマイク]を確認\n2. このサイトのマイクを許可してください');
-                } else {
-                    alert('マイクの使用が許可されていません。ブラウザの設定を確認してください。');
-                }
-            } else if (event.error === 'network') {
-                alert('ネットワークエラーが発生しました。インターネット接続を確認してください。');
-            } else if (event.error !== 'aborted') {
-                // aborted エラー（手動停止）以外はアラート表示
-                console.error('詳細:', {error: event.error, browser: isEdge ? 'Edge' : 'Other'});
-                alert('音声認識エラー: ' + event.error + '\nもう一度お試しください。');
-            }
-        };
-        
-        recognition.onend = function() {
-            console.log('音声認識終了');
-            statusDiv.style.display = 'none';
-            voiceBtn.innerHTML = '<i class="fas fa-microphone"></i> 音声で入力';
-            voiceBtn.classList.remove('btn-danger');
-            voiceBtn.classList.add('btn-outline-primary');
-            recognition.isListening = false;
-        };
-        
-        console.log('音声認識を開始します');
-        recognition.start();
-    } catch (error) {
-        console.error('音声認識エラー:', error);
-        alert('音声認識の初期化に失敗しました: ' + error.message);
-    }
-}
-
-// 音声入力停止
-function stopVoiceInput() {
-    console.log('音声入力停止');
-    if (recognition && recognition.isListening) {
-        try {
-            recognition.stop();
-        } catch (e) {
-            console.error('音声認識停止エラー:', e);
-            recognition.abort();
-        }
-        recognition.isListening = false;
-    }
+    if (!keyboardDiv) return;
+    keyboardDiv.style.display = enabled ? 'block' : 'none';
 }
 
 function testApiConnection() {
@@ -825,9 +611,24 @@ function addMessage(content, type, useTypingEffect = false) {
     } else {
         contentDiv.innerHTML = content;
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        ensureInputVisible();
     }
     
     return messageDiv; // 作成されたメッセージ要素を返す
+}
+
+// 入力欄が常に見えるようにスクロールを調整
+function ensureInputVisible() {
+    try {
+        const messagesContainer = document.getElementById('chatMessages');
+        const inputArea = document.querySelector('.user-input-area');
+        if (!messagesContainer || !inputArea) return;
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        const extra = 8;
+        messagesContainer.scrollTop = Math.max(0, messagesContainer.scrollHeight - messagesContainer.clientHeight + extra);
+    } catch (e) {
+        console.error('ensureInputVisible error', e);
+    }
 }
 
 // タイピングエフェクト関数
@@ -1281,155 +1082,7 @@ function reportError(errorMessage, errorType = 'client_error', additionalInfo = 
     });
 }
 
-// 音声入力開始
-function startVoiceInput() {
-    const voiceBtn = document.getElementById('voiceInputBtn');
-    
-    if (recognition && recognition.isListening) {
-        console.log('音声認識停止');
-        recognition.abort();
-        voiceBtn.innerHTML = '<i class="fas fa-microphone"></i> 音声で入力';
-        voiceBtn.classList.remove('btn-danger');
-        voiceBtn.classList.add('btn-outline-primary');
-        return;
-    }
-    
-    // Web Speech API のサポート確認
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-        const isEdge = navigator.userAgent.includes('Edg');
-        if (isEdge) {
-            alert('お使いの Edge ブラウザでは音声入力が対応していない可能性があります。\nChrome または Safari をお使いください。');
-        } else {
-            alert('お使いのブラウザは音声入力に対応していません。Chrome、Edge、Safari をお使いください。');
-        }
-        console.error('Web Speech API not supported');
-        return;
-    }
-    
-    console.log('Web Speech API サポート確認OK');
-    
-    // 本番環境対応: getUserMedia を先制取得してマイク権限を確認
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        console.log('getUserMedia をリクエスト中...');
-        navigator.mediaDevices.getUserMedia({ audio: true })
-            .then(function(stream) {
-                console.log('マイクアクセス許可取得');
-                // ストリームを停止（音声認識が自動的に使用）
-                stream.getTracks().forEach(track => track.stop());
-                // マイクアクセス許可後に音声認識を開始
-                initializeVoiceRecognitionReflection();
-            })
-            .catch(function(error) {
-                console.error('getUserMedia エラー:', error.name, error.message);
-                if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-                    alert('マイクの使用が許可されていません。ブラウザの設定を確認してください。');
-                } else if (error.name === 'NotFoundError') {
-                    alert('マイクが見つかりません。');
-                } else {
-                    alert('マイクアクセスエラー: ' + error.message);
-                }
-            });
-    } else {
-        // getUserMedia がない場合は直接音声認識を開始
-        console.log('getUserMedia がないため、直接音声認識を開始します');
-        initializeVoiceRecognitionReflection();
-    }
-}
-
-// 音声認識の初期化と開始（reflection 用）
-function initializeVoiceRecognitionReflection() {
-    try {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        recognition = new SpeechRecognition();
-        
-        // 言語設定
-        recognition.lang = 'ja-JP';
-        recognition.continuous = true;  // 継続的に認識
-        recognition.interimResults = true;  // 途中結果も取得
-        recognition.maxAlternatives = 1;  // 最大候補数
-        
-        const statusDiv = document.getElementById('voiceInputStatus');
-        const statusText = document.getElementById('voiceStatusText');
-        const voiceBtn = document.getElementById('voiceInputBtn');
-        const input = document.getElementById('messageInput');
-        
-        let startPosition = 0;
-        
-        recognition.onstart = function() {
-            console.log('音声認識開始');
-            recognition.isListening = true;
-            startPosition = input.value.length;
-            statusDiv.style.display = 'block';
-            statusText.textContent = '音声を認識中...';
-            voiceBtn.innerHTML = '<i class="fas fa-stop"></i> 停止';
-            voiceBtn.classList.add('btn-danger');
-            voiceBtn.classList.remove('btn-outline-primary');
-        };
-        
-        recognition.onresult = function(event) {
-            let interimTranscript = '';
-            let finalTranscript = '';
-            
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-                const transcript = event.results[i][0].transcript;
-                const isFinal = event.results[i].isFinal;
-                
-                if (isFinal) {
-                    finalTranscript += transcript + ' ';
-                } else {
-                    interimTranscript += transcript;
-                }
-            }
-            
-            if (finalTranscript.trim()) {
-                const cleanedFinalTranscript = finalTranscript.trim();
-                input.value += cleanedFinalTranscript + ' ';
-                startPosition = input.value.length;
-                statusText.textContent = '✅ 認識完了: ' + cleanedFinalTranscript;
-            }
-            
-            if (interimTranscript) {
-                statusText.textContent = '🎤 認識中: ' + interimTranscript;
-            }
-            
-            input.focus();
-            input.scrollTop = input.scrollHeight;
-        };
-        
-        recognition.onerror = function(event) {
-            console.error('音声認識エラー:', event.error);
-            statusDiv.style.display = 'none';
-            voiceBtn.innerHTML = '<i class="fas fa-microphone"></i> 音声で入力';
-            voiceBtn.classList.remove('btn-danger');
-            voiceBtn.classList.add('btn-outline-primary');
-            recognition.isListening = false;
-            
-            if (event.error === 'no-speech') {
-                alert('音声が検出されませんでした。もう一度お試しください。');
-            } else if (event.error === 'not-allowed' || event.error === 'permission-denied') {
-                alert('マイクの使用が許可されていません。ブラウザの設定を確認してください。');
-            } else if (event.error === 'network') {
-                alert('ネットワークエラーが発生しました。インターネット接続を確認してください。');
-            } else if (event.error !== 'aborted') {
-                alert('音声認識エラー: ' + event.error + '\nもう一度お試しください。');
-            }
-        };
-        
-        recognition.onend = function() {
-            console.log('音声認識終了');
-            recognition.isListening = false;
-            statusDiv.style.display = 'none';
-            voiceBtn.innerHTML = '<i class="fas fa-microphone"></i> 音声で入力';
-            voiceBtn.classList.remove('btn-danger');
-            voiceBtn.classList.add('btn-outline-primary');
-        };
-        
-        recognition.start();
-    } catch (error) {
-        console.error('SpeechRecognition 初期化エラー:', error);
-        alert('音声認識の初期化に失敗しました: ' + error.message);
-    }
-}
+// 音声入力関連のスクリプトは削除されました
 
 // グローバルエラーハンドラ
 window.addEventListener('error', (event) => {
