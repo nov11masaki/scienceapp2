@@ -2912,7 +2912,7 @@ body {
     padding: 6px;
     background: var(--white-color);
     border-bottom: 2px solid var(--primary-color);
-    overflow: hidden;
+    overflow-y: auto;  /* 要約表示時に隠れないようスクロールを許可 */
 }
 
 .chat-section .chat-header {
