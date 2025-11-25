@@ -24,7 +24,7 @@
                 <div class="row g-3">
                     <div class="col-md-2">
                         <label class="form-label">日付</label>
-                        <select class="form-select" id="dateFilter" onchange="applyFilters()">
+                        <select class="form-select" id="dateFilter" title="日付で絞り込む" onchange="applyFilters()">
                             {% for date_info in available_dates %}
                             <option value="{{ date_info.raw }}" {% if current_date == date_info.raw %}selected{% endif %}>
                                 {{ date_info.formatted }}
@@ -34,7 +34,7 @@
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">単元</label>
-                        <select class="form-select" id="unitFilter" onchange="applyFilters()">
+                        <select class="form-select" id="unitFilter" title="単元で絞り込む" onchange="applyFilters()">
                             <option value="">すべての単元</option>
                             {% for unit in units %}
                             <option value="{{ unit }}" {% if current_unit == unit %}selected{% endif %}>
@@ -45,7 +45,7 @@
                     </div>
                     <div class="col-md-2">
                         <label class="form-label">クラス</label>
-                        <select class="form-control" id="classFilter" onchange="applyFilters()">
+                        <select class="form-control" id="classFilter" title="クラスで絞り込む" onchange="applyFilters()">
                             <option value="">全て</option>
                             <option value="1" {% if current_class == '1' %}selected{% endif %}>1組</option>
                             <option value="2" {% if current_class == '2' %}selected{% endif %}>2組</option>
