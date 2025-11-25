@@ -215,7 +215,7 @@ function clearFilters() {
     applyFilters();
 }
 
-function exportCurrentData() {
+function exportCurrentData(format) {
     // format: 'csv' or 'json'
     format = format || 'csv';
     const date = document.getElementById('dateFilter').value;
@@ -230,24 +230,39 @@ function exportCurrentData() {
         exportUrl = `/teacher/export?date=${date}&unit=${unit}&class=${classNum}&student=${student}`;
     }
 
-    // 新しいウィンドウを開く方法はポップアップブロックされることがあるため、
-    // programmatic anchor click によるダウンロードを行う（より確実）
-    try {
+    // fetch して Blob を作り、プログラム的にダウンロードする方式に変更
+    fetch(exportUrl, { credentials: 'same-origin' })
+    .then(response => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        // ファイル名を Content-Disposition から取り出す（なければフォールバック）
+        const cd = response.headers.get('Content-Disposition') || '';
+        let filename = '';
+        const m = cd.match(/filename\*?=(?:UTF-8'' )?"?([^;"\n]+)"?/i);
+        if (m && m[1]) {
+            filename = decodeURIComponent(m[1]);
+        } else {
+            const ext = format === 'json' ? 'zip' : 'csv';
+            filename = `learning_logs_${date}.${ext}`;
+        }
+        return response.blob().then(blob => ({ blob, filename }));
+    })
+    .then(({ blob, filename }) => {
+        const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = exportUrl;
-        a.target = '_blank';
-        // 見た目を壊さないために非表示で追加・クリック
-        a.style.display = 'none';
+        a.href = url;
+        a.download = filename;
         document.body.appendChild(a);
         a.click();
-        document.body.removeChild(a);
+        a.remove();
+        URL.revokeObjectURL(url);
         setTimeout(() => {
-            alert(`📥 ${date} のログをダウンロードしています (${format.toUpperCase()})。`);
-        }, 400);
-    } catch (e) {
-        alert('ダウンロードに失敗しました。ブラウザの設定を確認してください。');
-        console.error('exportCurrentData error', e);
-    }
+            alert(`📥 ${date} のログをダウンロードしました (${format.toUpperCase()})。`);
+        }, 300);
+    })
+    .catch(err => {
+        console.error('Export fetch error', err);
+        alert('ダウンロードに失敗しました。サーバーまたはネットワークを確認してください。');
+    });
 }
 
 

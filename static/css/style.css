@@ -385,7 +385,7 @@ body {
 
 .teacher-logs .student-card {
     background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
-    border: 1px solid var(--border-color);
+    border: 1.6px solid #bfcbd6; /* よりはっきりした枠線 */
     border-radius: 12px;
     padding: 18px;
     box-shadow: var(--shadow-light);
@@ -404,7 +404,7 @@ body {
 
 .teacher-logs .unit-item {
     background: #ffffff;
-    border: 1px dashed #e6eef6;
+    border: 1px solid #dfeaf5; /* 実線で見やすく */
     padding: 10px 12px;
     border-radius: 10px;
 }
