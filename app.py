@@ -1563,58 +1563,6 @@ def sync_session():
             'details': str(e)
         }), 500
 
-def _save_summary_to_db(summary_entry):
-    """サマリーをデータベースに保存（GCS/ローカルハイブリッド）"""
-    try:
-        # ローカルに保存
-        _save_summary_local(summary_entry)
-        
-        # GCSに保存
-        if USE_GCS and bucket:
-            _save_summary_gcs(summary_entry)
-    except Exception as e:
-        print(f"[SUMMARY_SAVE] Error: {e}")
-
-def _save_summary_local(summary_entry):
-    """サマリーをローカルファイルに保存"""
-    try:
-        summaries = {}
-        summary_file = 'summary_storage.json'
-        if os.path.exists(summary_file):
-            with open(summary_file, 'r', encoding='utf-8') as f:
-                summaries = json.load(f)
-        
-        student_id = summary_entry['student_id']
-        unit = summary_entry['unit']
-        stage = summary_entry['stage']
-        key = f"{student_id}_{unit}_{stage}"
-        summaries[key] = summary_entry
-        
-        with open(summary_file, 'w', encoding='utf-8') as f:
-            json.dump(summaries, f, ensure_ascii=False, indent=2)
-        print(f"[SUMMARY_SAVE] Local - {key}")
-    except Exception as e:
-        print(f"[SUMMARY_SAVE] Local Error: {e}")
-
-def _save_summary_gcs(summary_entry):
-    """サマリーをGCSに保存"""
-    try:
-        from google.cloud import storage
-        student_id = summary_entry['student_id']
-        unit = summary_entry['unit']
-        stage = summary_entry['stage']
-        
-        # GCSのパス: summaries/{student_id}/{unit}/{stage}_summary.json
-        gcs_path = f"summaries/{student_id}/{unit}/{stage}_summary.json"
-        blob = bucket.blob(gcs_path)
-        blob.upload_from_string(
-            json.dumps(summary_entry, ensure_ascii=False, indent=2),
-            content_type='application/json'
-        )
-        print(f"[SUMMARY_SAVE] GCS - {gcs_path}")
-    except Exception as e:
-        print(f"[SUMMARY_SAVE] GCS Error: {e}")
-
 def _save_summary_to_db(student_id, unit, stage, summary_text):
     """サマリーを永続ストレージに保存（GCS優先、ローカルはフォールバック）"""
     # 本番環境: GCS優先
