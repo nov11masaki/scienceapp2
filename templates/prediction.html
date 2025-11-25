@@ -5,8 +5,44 @@
 {% block content %}
 <div class="chat-page-vertical">
     <div class="container-fluid h-100">
-        <!-- 再テストボタンを削除（ユーザー要望） -->
-        <div class="chat-messages" id="chatMessages">
+        <div class="chat-section">
+            <div class="chat-header text-center mb-2 position-relative">
+                <div class="header-left-button">
+                    <button class="btn btn-secondary btn-sm" id="backToUnitHeaderButton" onclick="goBackToUnitSelection()">
+                        <i class="fas fa-arrow-left me-2"></i>
+                        戻る
+                    </button>
+                </div>
+
+                <h2 class="mb-2">
+                    <i class="fas fa-lightbulb text-primary"></i>
+                    予想を立てよう
+                </h2>
+                <div class="unit-display">
+                    <span class="badge bg-primary fs-6">{{ unit }}</span>
+                </div>
+            </div>
+
+            <div class="task-section mb-2">
+                <div class="task-card">
+                    <h5 class="task-title">
+                        <i class="fas fa-seedling"></i>
+                        今回のやること
+                    </h5>
+                    <p class="task-content">温めたとき・冷やしたときに空気がどうなるかを予想しよう。前に見たり感じた体験を思い出して伝えてね。</p>
+                </div>
+            </div>
+
+            <div class="chat-container">
+                <div class="api-status" id="apiStatus">
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <span id="apiStatusMessage">AI接続を確認中...</span>
+                    </div>
+                </div>
+
+                <!-- 再テストボタンを削除（ユーザー要望） -->
+                <div class="chat-messages" id="chatMessages">
                     <div class="message ai-message">
                         <div class="message-avatar"></div>
                         <div class="message-content">
@@ -92,6 +128,11 @@
                     </button>
                     <button class="btn btn-danger flex-fill" id="clearBtn">
                         <i class="fas fa-times"></i> 全消去
+                    </button>
+                </div>
+                <div class="d-flex gap-2 mt-3">
+                    <button class="btn btn-success flex-fill" id="predictionSummaryBtn" onclick="getSummary()">
+                        <i class="fas fa-check me-2"></i>予想をまとめる
                     </button>
                 </div>
             </div>
@@ -1028,4 +1069,3 @@ window.addEventListener('unhandledrejection', (event) => {
 
 </script>
 {% endblock %}
-

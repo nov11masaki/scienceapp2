@@ -231,15 +231,25 @@ function exportCurrentData(format) {
     }
 
     // fetch して Blob を作り、プログラム的にダウンロードする方式に変更
-    fetch(exportUrl, { credentials: 'same-origin' })
+    fetch(exportUrl, { credentials: 'include' })
     .then(response => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        // ログイン切れやエラーページをダウンロードしない
+        const contentType = response.headers.get('Content-Type') || '';
+        if (contentType.includes('text/html')) {
+            throw new Error('セッションが切れています。ログインし直してください。');
+        }
+
         // ファイル名を Content-Disposition から取り出す（なければフォールバック）
         const cd = response.headers.get('Content-Disposition') || '';
         let filename = '';
-        const m = cd.match(/filename\*?=(?:UTF-8'' )?"?([^;"\n]+)"?/i);
-        if (m && m[1]) {
-            filename = decodeURIComponent(m[1]);
+        const utf8Match = cd.match(/filename\*=\s*UTF-8''([^;"\n]+)/i);
+        const plainMatch = cd.match(/filename="?([^;"\n]+)"?/i);
+        if (utf8Match && utf8Match[1]) {
+            filename = decodeURIComponent(utf8Match[1]);
+        } else if (plainMatch && plainMatch[1]) {
+            filename = plainMatch[1];
         } else {
             const ext = format === 'json' ? 'zip' : 'csv';
             filename = `learning_logs_${date}.${ext}`;
@@ -261,7 +271,13 @@ function exportCurrentData(format) {
     })
     .catch(err => {
         console.error('Export fetch error', err);
-        alert('ダウンロードに失敗しました。サーバーまたはネットワークを確認してください。');
+        alert(err.message || 'ダウンロードに失敗しました。サーバーまたはネットワークを確認してください。');
+        // fetch が失敗した場合も通常のダウンロードにフォールバック
+        try {
+            window.location.href = exportUrl;
+        } catch (e) {
+            console.error('フォールバックのダウンロードも失敗:', e);
+        }
     });
 }
 

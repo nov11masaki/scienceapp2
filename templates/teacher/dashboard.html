@@ -88,14 +88,45 @@ function exportData(format = 'csv') {
         ? '📥 JSON形式のログをダウンロード中...'
         : '📥 CSV形式のログをダウンロード中...';
     showToast(message, 'info');
-    const downloadWindow = window.open(exportUrl, '_blank');
-    if (!downloadWindow) {
-        showToast('⚠️ ブラウザのポップアップブロックを解除してください', 'warning');
-        return;
-    }
-    setTimeout(() => {
+
+    fetch(exportUrl, { credentials: 'include' })
+    .then(response => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const contentType = response.headers.get('Content-Type') || '';
+        if (contentType.includes('text/html')) {
+            throw new Error('セッションが切れています。ログインし直してください。');
+        }
+        const cd = response.headers.get('Content-Disposition') || '';
+        let filename = '';
+        const utf8Match = cd.match(/filename\*=\s*UTF-8''([^;"\n]+)/i);
+        const plainMatch = cd.match(/filename="?([^;"\n]+)"?/i);
+        if (utf8Match && utf8Match[1]) {
+            filename = decodeURIComponent(utf8Match[1]);
+        } else if (plainMatch && plainMatch[1]) {
+            filename = plainMatch[1];
+        } else {
+            const ext = format === 'json' ? 'zip' : 'csv';
+            filename = `learning_logs_${today}.${ext}`;
+        }
+        return response.blob().then(blob => ({ blob, filename }));
+    })
+    .then(({ blob, filename }) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
         showToast(format === 'json' ? '✅ JSONのダウンロード完了' : '✅ CSVのダウンロード完了', 'success');
-    }, 1500);
+    })
+    .catch(error => {
+        console.error('Export download failed:', error);
+        showToast(error.message || 'ダウンロードに失敗しました', 'error');
+        // 最低限のフォールバックとして通常遷移でダウンロード
+        setTimeout(() => { window.location.href = exportUrl; }, 400);
+    });
 }
 
 </script>

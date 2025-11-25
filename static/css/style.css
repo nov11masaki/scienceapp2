@@ -385,10 +385,10 @@ body {
 
 .teacher-logs .student-card {
     background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
-    border: 1.6px solid #bfcbd6; /* よりはっきりした枠線 */
+    border: 2px solid #9fb4c9; /* はっきりした枠線 */
     border-radius: 12px;
     padding: 18px;
-    box-shadow: var(--shadow-light);
+    box-shadow: 0 6px 18px rgba(15, 53, 88, 0.08);
 }
 
 .teacher-logs .student-header h4 {
@@ -400,13 +400,18 @@ body {
     margin-top: 12px;
     display: grid;
     gap: 10px;
+    padding: 10px;
+    border: 1px solid #dbe6f5;
+    border-radius: 10px;
+    background: #f8fbff;
 }
 
 .teacher-logs .unit-item {
     background: #ffffff;
-    border: 1px solid #dfeaf5; /* 実線で見やすく */
-    padding: 10px 12px;
+    border: 1.6px solid #c6d4e4; /* 実線で見やすく */
+    padding: 12px 14px;
     border-radius: 10px;
+    box-shadow: inset 0 0 0 1px #e5edf7;
 }
 
 .teacher-logs .summary-preview p {
