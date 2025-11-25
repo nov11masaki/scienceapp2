@@ -2233,6 +2233,32 @@ def teacher_export():
             except Exception as e:
                 print(f"[EXPORT] ERROR loading logs from {current_date_raw}: {str(e)}")
                 continue
+
+    # フロントのフィルタ（現在の表示）に合わせて絞り込み可能にする
+    unit_filter = request.args.get('unit', '')
+    class_filter = request.args.get('class', '')
+    student_filter = request.args.get('student', '')
+
+    def matches_filters(log):
+        if unit_filter and log.get('unit') != unit_filter:
+            return False
+        if class_filter:
+            try:
+                cf_int = normalize_class_value_int(class_filter)
+                if cf_int is not None and log.get('class_num') != cf_int:
+                    return False
+            except Exception:
+                pass
+        if student_filter:
+            try:
+                if int(student_filter) != int(log.get('seat_num') or -1):
+                    return False
+            except Exception:
+                if str(student_filter) != str(log.get('student_number')):
+                    return False
+        return True
+
+    filtered_logs = [log for log in all_logs if matches_filters(log)]
     
     # CSVをメモリに作成（UTF-8 BOM付き）
     output = StringIO()
@@ -2240,7 +2266,7 @@ def teacher_export():
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
     
-    for log in all_logs:
+    for log in filtered_logs:
         content = ""
         if log.get('log_type') == 'prediction_chat':
             content = f"Q: {log['data'].get('user_message', '')}\nA: {log['data'].get('ai_response', '')}"
@@ -2266,7 +2292,7 @@ def teacher_export():
     
     filename = f"all_learning_logs_up_to_{download_date_str}.csv"
     
-    print(f"[EXPORT] SUCCESS - exported {len(all_logs)} total logs, size: {len(csv_bytes)} bytes")
+    print(f"[EXPORT] SUCCESS - exported {len(filtered_logs)} total logs, size: {len(csv_bytes)} bytes")
     
     return Response(
         csv_bytes,
@@ -2299,12 +2325,38 @@ def teacher_export_json():
             except Exception as e:
                 print(f"[EXPORT_JSON] ERROR loading logs from {current_date_raw}: {str(e)}")
                 continue
+
+    # フィルタリング（テンプレートの現在の表示に合わせる）
+    unit_filter = request.args.get('unit', '')
+    class_filter = request.args.get('class', '')
+    student_filter = request.args.get('student', '')
+
+    def matches_filters(log):
+        if unit_filter and log.get('unit') != unit_filter:
+            return False
+        if class_filter:
+            try:
+                cf_int = normalize_class_value_int(class_filter)
+                if cf_int is not None and log.get('class_num') != cf_int:
+                    return False
+            except Exception:
+                pass
+        if student_filter:
+            try:
+                if int(student_filter) != int(log.get('seat_num') or -1):
+                    return False
+            except Exception:
+                if str(student_filter) != str(log.get('student_number')):
+                    return False
+        return True
+
+    filtered_logs = [log for log in all_logs if matches_filters(log)]
     
     # 児童ごと・単元ごとにグループ化
     # 構造: {unit: {student_id: [logs]}}
     structured_logs = {}
     
-    for log in all_logs:
+    for log in filtered_logs:
         unit = log.get('unit', 'unknown')
         student_id = log.get('student_number', 'unknown')
         
@@ -2342,7 +2394,7 @@ def teacher_export_json():
     zip_buffer.seek(0)
     filename = f"dialogue_logs_up_to_{download_date_str}.zip"
     
-    print(f"[EXPORT_JSON] SUCCESS - exported JSON with {len(all_logs)} total logs")
+    print(f"[EXPORT_JSON] SUCCESS - exported JSON with {len(filtered_logs)} total logs")
     
     return Response(
         zip_buffer.getvalue(),
