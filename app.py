@@ -1449,12 +1449,19 @@ def summary():
             'is_insufficient': True
         }), 400
     
-    # 単元のプロンプトを読み込み（要約の指示は既にプロンプトファイルに含まれている）
-    unit_prompt = load_unit_prompt(unit)
+    # 単元のプロンプトを読み込み（予想段階の指示を必ず参照）
+    unit_prompt = load_unit_prompt(unit, stage='prediction')
+    
+    summary_instruction = (
+        "以下の会話内容のみをもとに、児童の話した言葉や順序を活かして予想をまとめてください。"
+        "児童が自分のノートにそのまま写せる、短い1〜2文にしてください。"
+        "「〜と思う。なぜなら〜。」の形で、むずかしい言い回しや第三者目線（例:「児童は〜」）は使わないでください。"
+        "会話に含まれていない内容や新しい事実は追加しないでください。"
+    )
     
     # メッセージフォーマットで構築
     messages = [
-        {"role": "system", "content": unit_prompt + "\n\n【重要】以下の会話内容のみをもとに、児童の話した言葉や順序を活かして、予想をまとめてください。会話に含まれていない内容は追加しないでください。"}
+        {"role": "system", "content": f"{unit_prompt}\n\n【重要】{summary_instruction}"}
     ]
     
     # 対話履歴をメッセージフォーマットで追加
@@ -1471,13 +1478,19 @@ def summary():
     })
     
     try:
-        summary_response = call_openai_with_retry(messages, model_override="gpt-4o-mini", enable_cache=True)
+        summary_response = call_openai_with_retry(
+            messages,
+            model_override="gpt-4o-mini",
+            enable_cache=True,
+            stage='prediction'
+        )
         
         # JSON形式のレスポンスの場合は解析して純粋なメッセージを抽出
         summary_text = extract_message_from_json_response(summary_response)
         
         # セッションに保存してから、フラグとログを更新
         session['prediction_summary'] = summary_text
+        session['prediction_summary_created'] = True
         session.modified = True
         
         # 予想まとめを永続ストレージに保存（セッション切れ対策）

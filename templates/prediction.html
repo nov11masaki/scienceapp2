@@ -195,7 +195,11 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // 予想のまとめが完了していれば復元
-    if (predictionStatus && predictionStatus.prediction_summary_created) {
+    const hasExistingSummary = predictionStatus && (
+        predictionStatus.prediction_summary_created ||
+        (predictionStatus.predictionSummary && predictionStatus.predictionSummary.trim() !== '')
+    );
+    if (hasExistingSummary) {
         console.log('予想のまとめが完了しています');
         // サーバーから予想のまとめを取得
         restorePredictionSummary();
@@ -890,6 +894,35 @@ function isMeaningfulSummary(summary) {
     return hasValidContent;
 }
 
+function renderPredictionSummary(summaryText) {
+    if (!summaryText) return false;
+    
+    const summaryContent = document.getElementById('summaryContent');
+    if (summaryContent) {
+        summaryContent.innerHTML = summaryText.replace(/\n/g, '<br>');
+        console.log('【DEBUG】summaryContent に要約を設定しました (prediction)');
+    }
+    
+    const summarySection = document.getElementById('summarySection');
+    if (summarySection) {
+        summarySection.style.display = 'block';
+    }
+    
+    const summaryButton = document.getElementById('summaryButton');
+    if (summaryButton) {
+        summaryButton.style.display = 'none';
+        summaryButton.disabled = true;
+    }
+    
+    const secondarySummaryBtn = document.getElementById('predictionSummaryBtn');
+    if (secondarySummaryBtn) {
+        secondarySummaryBtn.style.display = 'none';
+        secondarySummaryBtn.disabled = true;
+    }
+    
+    return true;
+}
+
 function getSummary() {
     console.log('【DEBUG】getSummary 呼び出し');
     
@@ -960,15 +993,9 @@ function getSummary() {
         
         // 要約はチャット内に追加せず、上部のサマリー領域 (`summarySection`) にのみ表示する
         session['prediction_summary'] = data.summary;
-        const summaryContent = document.getElementById('summaryContent');
-        if (summaryContent) {
-            summaryContent.innerHTML = data.summary.replace(/\n/g, '<br>');
-            console.log('【DEBUG】summaryContent に要約を設定しました (prediction)');
-        }
-        const summarySection = document.getElementById('summarySection');
-        if (summarySection) {
-            summarySection.style.display = 'block';
-        }
+        predictionStatus.prediction_summary_created = true;
+        predictionStatus.predictionSummary = data.summary;
+        renderPredictionSummary(data.summary);
     })
     .catch(error => {
         console.error('【DEBUG】Summary Error:', error);
@@ -1015,6 +1042,33 @@ function switchInputMode() {
 // 復帰時に予想のまとめを復元する関数
 function restorePredictionSummary() {
     console.log('restorePredictionSummary: 予想のまとめを復元中...');
+    
+    const sessionSummary = predictionStatus && predictionStatus.predictionSummary;
+    if (sessionSummary && renderPredictionSummary(sessionSummary)) {
+        console.log('【DEBUG】セッション保存の要約を表示しました');
+        return;
+    }
+    
+    fetch('/get_prediction_summary')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data && data.summary) {
+                renderPredictionSummary(data.summary);
+                predictionStatus.predictionSummary = data.summary;
+                predictionStatus.prediction_summary_created = true;
+                console.log('【DEBUG】サーバーから要約を復元しました');
+            } else {
+                console.log('【DEBUG】復元する要約がありません');
+            }
+        })
+        .catch(error => {
+            console.warn('【DEBUG】要約復元に失敗しました:', error);
+        });
 }
 
 // エラー報告関数
