@@ -1547,14 +1547,8 @@ def sync_session():
         
         # サマリーも保存したい場合は別途保存
         if summary_content:
-            summary_entry = {
-                'timestamp': datetime.now().isoformat(),
-                'student_id': student_id,
-                'unit': unit,
-                'stage': stage,
-                'summary': summary_content
-            }
-            _save_summary_to_db(summary_entry)
+            # Save the summary using the standard helper (student_id, unit, stage, summary_text)
+            _save_summary_to_db(student_id, unit, stage, summary_content)
         
         print(f"[SYNC] Session synced - {student_id}_{unit}_{stage}")
         return jsonify({
