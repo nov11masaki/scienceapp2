@@ -376,6 +376,53 @@ body {
     line-height: 1.6;
 }
 
+/* Teacher logs: make student cards and unit items clearer */
+.teacher-logs .students-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 18px;
+}
+
+.teacher-logs .student-card {
+    background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 18px;
+    box-shadow: var(--shadow-light);
+}
+
+.teacher-logs .student-header h4 {
+    margin: 0 0 8px 0;
+    font-size: 1.05rem;
+}
+
+.teacher-logs .units-list {
+    margin-top: 12px;
+    display: grid;
+    gap: 10px;
+}
+
+.teacher-logs .unit-item {
+    background: #ffffff;
+    border: 1px dashed #e6eef6;
+    padding: 10px 12px;
+    border-radius: 10px;
+}
+
+.teacher-logs .summary-preview p {
+    margin: 6px 0 0 0;
+    color: #444;
+}
+
+.student-id-badge {
+    font-size: 0.85rem;
+    background: #f3f6fb;
+    padding: 4px 8px;
+    border-radius: 8px;
+    margin-left: 8px;
+    color: #0b57a4;
+}
+
 .home-feature-icon {
     width: 72px;
     height: 72px;

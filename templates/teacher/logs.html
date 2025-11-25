@@ -230,13 +230,23 @@ function exportCurrentData() {
         exportUrl = `/teacher/export?date=${date}&unit=${unit}&class=${classNum}&student=${student}`;
     }
 
-    const downloadWindow = window.open(exportUrl, '_blank');
-    if (!downloadWindow) {
-        alert('ブラウザのポップアップブロックを解除して再度お試しください。');
-    } else {
+    // 新しいウィンドウを開く方法はポップアップブロックされることがあるため、
+    // programmatic anchor click によるダウンロードを行う（より確実）
+    try {
+        const a = document.createElement('a');
+        a.href = exportUrl;
+        a.target = '_blank';
+        // 見た目を壊さないために非表示で追加・クリック
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
         setTimeout(() => {
             alert(`📥 ${date} のログをダウンロードしています (${format.toUpperCase()})。`);
-        }, 500);
+        }, 400);
+    } catch (e) {
+        alert('ダウンロードに失敗しました。ブラウザの設定を確認してください。');
+        console.error('exportCurrentData error', e);
     }
 }
 
