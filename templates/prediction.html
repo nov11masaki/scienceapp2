@@ -5,11 +5,7 @@
 {% block content %}
 <div class="chat-page-vertical">
     <div class="container-fluid h-100">
-        <div class="d-flex justify-content-end mb-2">
-            <button class="btn btn-sm btn-outline-secondary ms-2" onclick="testApiConnection()">
-                <i class="fas fa-sync"></i> 再テスト
-            </button>
-        </div>
+        <!-- 再テストボタンを削除（ユーザー要望） -->
         <div class="chat-messages" id="chatMessages">
                     <div class="message ai-message">
                         <div class="message-avatar"></div>
@@ -164,7 +160,7 @@ document.addEventListener('DOMContentLoaded', function() {
         restorePredictionSummary();
     }
     
-    testApiConnection();
+    // 自動の API 再テストは行わない（ユーザー不要）
     
     // デフォルトで50音表がOFFなので、入力補助エリアを縮小
     const inputAssistSection = document.getElementById('inputAssistSection');
@@ -409,12 +405,17 @@ function saveConversationToLocalStorage(message, role) {
     try {
         const sessionKey = `conversation_${classNumber}_${studentNumber}_${unit}`;
         let history = JSON.parse(localStorage.getItem(sessionKey) || '[]');
-        
-        history.push({
-            role: role,
-            content: message,
-            timestamp: new Date().toISOString()
-        });
+        // 直前保存と重複している場合は保存をスキップ
+        const last = history.length ? history[history.length - 1] : null;
+        if (last && last.role === role && last.content === message) {
+            console.log('Skipping duplicate save to localStorage');
+        } else {
+            history.push({
+                role: role,
+                content: message,
+                timestamp: new Date().toISOString()
+            });
+        }
         
         localStorage.setItem(sessionKey, JSON.stringify(history));
         console.log('【DEBUG】会話履歴を localStorage に保存:', sessionKey, history.length, 'messages');
@@ -520,6 +521,19 @@ function sendMessage() {
     const message = input.value.trim();
     
     if (!message) return;
+    // 直前のユーザーメッセージと同じ内容なら送信しない
+    try {
+        const messagesContainer = document.getElementById('chatMessages');
+        const lastUserMsg = Array.from(messagesContainer.querySelectorAll('.message.user-message .message-content')).pop();
+        if (lastUserMsg && lastUserMsg.textContent.trim() === message) {
+            console.log('Duplicate user message suppressed:', message);
+            input.value = '';
+            input.focus();
+            return;
+        }
+    } catch (e) {
+        console.warn('duplicate check failed', e);
+    }
     
     // ユーザーメッセージを表示
     addMessage(message, 'user');
@@ -534,6 +548,22 @@ function sendMessage() {
 
 function addMessage(content, type, useTypingEffect = false) {
     const messagesContainer = document.getElementById('chatMessages');
+    // 直前のメッセージと重複している場合は追加しない
+    try {
+        const recent = Array.from(messagesContainer.querySelectorAll('.message')).filter(m => !m.classList.contains('user-input-area')).pop();
+        if (recent) {
+            const recentContent = recent.querySelector('.message-content')?.textContent?.trim();
+            const recentIsUser = recent.classList.contains('user-message');
+            const isUser = (type === 'user');
+            if (recentContent === content.trim() && recentIsUser === isUser) {
+                console.log('Duplicate message suppressed:', content);
+                return recent;
+            }
+        }
+    } catch (e) {
+        console.warn('dup check failed', e);
+    }
+
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${type}-message`;
     
@@ -710,10 +740,8 @@ function sendMessageToAPI(message) {
             // ユーザーメッセージ数をカウント（往復数 * 2 でメッセージ総数を算出）
             const totalMessages = conversationCount * 2;
             
-            // 6メッセージ以上またはAIが「まとめ」を促したら要約ボタンを表示
-            if (totalMessages >= 6 || data.suggest_summary || data.response.includes('まとめ') || data.response.includes('要約')) {
-                showPredictionSummaryButton(`会話数:${totalMessages}/${6} / suggest:${data.suggest_summary}`);
-            }
+            // 会話中に自動でまとめボタンを表示しない（学習者が手動でまとめるため）
+            // 以前は会話数やAIレスポンスで自動表示していたが、ユーザーの要望により無効化
             
             // デジタル学習ツインのインサイトを表示（開発時のみ）
             if (data.twin_insights && window.location.hostname === 'localhost') {
@@ -889,83 +917,16 @@ function getSummary() {
             return;
         }
         
-        // チャットにAIメッセージとして要約を追加
-        const messagesContainer = document.getElementById('chatMessages');
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'message ai-message';
-        messageDiv.innerHTML = `
-            <div class="message-avatar"></div>
-            <div class="message-content">${data.summary}</div>
-        `;
-        
-        // ユーザー入力エリアの直前に挿入
-        const userInputArea = messagesContainer.querySelector('.user-input-area');
-        if (userInputArea) {
-            userInputArea.parentNode.insertBefore(messageDiv, userInputArea);
-        } else {
-            messagesContainer.appendChild(messageDiv);
-        }
-        
-        // 入力エリアを非表示
-        if (userInputArea) {
-            userInputArea.style.display = 'none';
-        }
-        
-        // まとめボタンを非表示（単元選択に戻るボタンは表示したまま）
-        document.getElementById('summaryButton').style.display = 'none';
-        
-        // スクロール
-        setTimeout(() => {
-            messageDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        }, 300);
-        
-        // 要約後の状態を保存
+        // 要約はチャット内に追加せず、上部のサマリー領域 (`summarySection`) にのみ表示する
         session['prediction_summary'] = data.summary;
-        
-        // サマリーセクション全体を表示
-        const summarySection = document.getElementById('summarySection');
-        if (summarySection) {
-            summarySection.style.display = 'block';
-            console.log('【DEBUG】summarySection を表示しました');
-        }
-        
-        // チャット本体のみ非表示にして見やすくする
-        const chatContainer = document.querySelector('.chat-container');
-        if (chatContainer) {
-            chatContainer.style.display = 'none';
-            console.log('【DEBUG】chat-container を非表示にしました');
-        }
-        
-        // 課題カードも隠す（まとめ表示を強調）
-        const taskSection = document.querySelector('.task-section');
-        if (taskSection) {
-            taskSection.style.display = 'none';
-            console.log('【DEBUG】task-section を非表示にしました');
-        }
-        
-        // 入力補助エリアも非表示
-        const inputAssist = document.getElementById('inputAssistSection');
-        if (inputAssist) {
-            inputAssist.style.display = 'none';
-            console.log('【DEBUG】inputAssistSection を非表示にしました');
-        }
-        
-        // サマリーコンテンツに要約を設定
         const summaryContent = document.getElementById('summaryContent');
         if (summaryContent) {
             summaryContent.innerHTML = data.summary.replace(/\n/g, '<br>');
-            console.log('【DEBUG】summaryContent に要約を設定しました');
+            console.log('【DEBUG】summaryContent に要約を設定しました (prediction)');
         }
-        
-        // 単元選択に戻るボタンを表示（要約成功時のみ）
-        const backButton = document.getElementById('backToUnitButton');
-        console.log('【DEBUG】backToUnitButton:', backButton);
-        if (backButton) {
-            backButton.style.display = 'inline-block';
-            console.log('【DEBUG】単元選択に戻るボタンを表示しました');
-            setTimeout(() => {
-                backButton.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            }, 500);
+        const summarySection = document.getElementById('summarySection');
+        if (summarySection) {
+            summarySection.style.display = 'block';
         }
     })
     .catch(error => {
