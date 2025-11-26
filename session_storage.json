@@ -1,6 +1,6 @@
 {
   "5_29_空気の温度と体積_prediction": {
-    "timestamp": "2025-11-18T14:22:27.878470",
+    "timestamp": "2025-11-26T16:58:49.260738",
     "student_id": "5_29",
     "unit": "空気の温度と体積",
     "stage": "prediction",
@@ -11,31 +11,31 @@
       },
       {
         "role": "user",
-        "content": "体積はおきくなる"
+        "content": "体積は大きくなる"
       },
       {
         "role": "assistant",
-        "content": "なるほど、体積は大きくなると思うんだね。どうしてそう思ったのかな？何か経験がある？"
+        "content": "なるほど、体積は大きくなると思うんだね。どうしてそう思ったの？"
       },
       {
         "role": "user",
-        "content": "温めるとペットボトルはパンパンになった"
+        "content": "ペットボトルを温めるとパンパンになった"
       },
       {
         "role": "assistant",
-        "content": "ペットボトルがパンパンになったんだね。そのとき、中の空気がどうなったと思う？"
+        "content": "ペットボトルがパンパンになったんだね。そのときどんなようすだったの？"
       },
       {
         "role": "user",
-        "content": "膨らんだ"
+        "content": "ふくらんだ"
       },
       {
         "role": "assistant",
-        "content": "空気が膨らんだんだね。じゃあ、冷やしたらどうなると思う？小さくなるってことかな？"
+        "content": "ふくらんだんだね。じゃあ、冷やしたら小さくなるってこと？"
       },
       {
         "role": "user",
-        "content": "そういうこと"
+        "content": "そう"
       },
       {
         "role": "assistant",
@@ -44,7 +44,7 @@
     ]
   },
   "5_29_空気の温度と体積_reflection": {
-    "timestamp": "2025-11-18T15:31:22.046189",
+    "timestamp": "2025-11-26T17:01:43.190406",
     "student_id": "5_29",
     "unit": "空気の温度と体積",
     "stage": "reflection",
@@ -55,35 +55,11 @@
       },
       {
         "role": "user",
-        "content": "n"
+        "content": "あたためると体積は大きくなり、冷やすとちいさくなった"
       },
       {
         "role": "assistant",
-        "content": "じっけんではどんなけっかになった？"
-      },
-      {
-        "role": "user",
-        "content": "シャボン玉が膨らんだりした"
-      },
-      {
-        "role": "assistant",
-        "content": "シャボン玉が膨らんだんだね。それって、どうしてそうなったと思う？"
-      },
-      {
-        "role": "user",
-        "content": "温めたから"
-      },
-      {
-        "role": "assistant",
-        "content": "温めたから膨らんだんだね。面白いね！そのとき、どんなようすだった？シャボン玉が膨らむ様子はどうだった？"
-      },
-      {
-        "role": "user",
-        "content": "ぷクーと"
-      },
-      {
-        "role": "assistant",
-        "content": "「▌"
+        "content": "あ▌"
       }
     ]
   },

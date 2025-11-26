@@ -740,14 +740,13 @@ def save_learning_log(student_number, unit, log_type, data, class_number=None):
     }
     
     if USE_GCS and bucket:
-        # 本番環境: GCS優先
+        # 本番環境: GCSにも保存する（ローカル保存は必ず実施）
         try:
             log_date = datetime.now().strftime('%Y%m%d')
             log_filename = f"logs/learning_log_{log_date}.json"
             
             print(f"[LOG_SAVE] GCS START - path: {log_filename}, class: {class_display}, unit: {unit}, type: {log_type}")
             
-            # GCS からファイルを読み込み
             blob = bucket.blob(log_filename)
             logs = []
             try:
@@ -756,22 +755,19 @@ def save_learning_log(student_number, unit, log_type, data, class_number=None):
             except Exception:
                 logs = []
             
-            # ログエントリを追加
             logs.append(log_entry)
             
-            # GCS に保存
             blob.upload_from_string(
                 json.dumps(logs, ensure_ascii=False, indent=2).encode('utf-8'),
                 content_type='application/json'
             )
-            print(f"[LOG_SAVE] GCS SUCCESS - saved to GCS")
-            return  # GCS成功したらローカル保存は不要
+            print(f"[LOG_SAVE] GCS SUCCESS - saved to GCS (local copy will also be written)")
         except Exception as e:
-            print(f"[LOG_SAVE] GCS ERROR - {type(e).__name__}: {str(e)}, falling back to local")
+            print(f"[LOG_SAVE] GCS ERROR - {type(e).__name__}: {str(e)}, continue with local save")
             import traceback
             traceback.print_exc()
     
-    # 開発環境またはGCS失敗時: ローカルファイルに保存
+    # ローカルファイルにも必ず保存
     log_filename = f"learning_log_{datetime.now().strftime('%Y%m%d')}.json"
     os.makedirs('logs', exist_ok=True)
     log_file = f"logs/{log_filename}"
@@ -1456,6 +1452,7 @@ def summary():
         "以下の会話内容のみをもとに、児童の話した言葉や順序を活かして予想をまとめてください。"
         "児童が自分のノートにそのまま写せる、短い1〜2文にしてください。"
         "「〜と思う。なぜなら〜。」の形で、むずかしい言い回しや第三者目線（例:「児童は〜」）は使わないでください。"
+        "理由は児童が話した経験や具体的な様子のみを書き、結論を言い換えただけの理由（例:「体積が大きくなるのは体積がふくらむから」）は書かないでください。"
         "会話に含まれていない内容や新しい事実は追加しないでください。"
     )
     
