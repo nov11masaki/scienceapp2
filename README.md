@@ -234,6 +234,84 @@ gcloud run deploy science-buddy \
   --set-env-vars OPENAI_API_KEY=your_api_key,BUCKET_NAME=YOUR_BUCKET_NAME,FLASK_ENV=production
 ```
 
+## Docker イメージ（Waitress）
+
+このリポジトリの `Dockerfile` は `waitress` を使って WSGI アプリを実行します。
+ローカルやクラウドで Docker コンテナを起動する際に、学習進捗やセッションを永続化したい場合は
+ホストのディレクトリをコンテナの `/data` にマウントしてください（`learning_progress.json` と
+`session_storage.json` がそこに保存されます）。
+
+例: ローカルでビルドしてデータを永続化して実行する
+
+```bash
+# イメージをビルド
+docker build -t sciencebuddy:latest .
+
+# ./data をコンテナの /data にマウントして起動
+docker run -it --rm -p 8080:8080 -v $(pwd)/data:/data \
+   -e OPENAI_API_KEY=your_openai_api_key_here \
+   -e FLASK_ENV=production \
+   -e PORT=8080 \
+   sciencebuddy:latest
+```
+
+上の例ではコンテナ内の `/data/learning_progress.json` と `/data/session_storage.json` が
+ホストの `./data` に永続化されます。デプロイ前に「予想を完了」している状態はこのファイルに
+記録されるため、コンテナを再起動・再デプロイしても進捗状態は維持されます。
+
+### 注意点
+- Cloud Run のようなステートレスな環境では、コンテナローカルに書き込んでも再起動やスケールで
+   データが失われます。永続化が必要な場合は Cloud Storage や Firestore など外部ストレージを利用
+   してください（`FLASK_ENV=production` のときは GCS を優先する設定になっています）。
+
+## 🔁 非同期ジョブ（要約の非同期化）
+
+このリポジトリは RQ（Redis Queue）を使ったジョブキューのプロトタイプを含みます。要約のような
+外部 API 呼び出しを伴う重い処理は Web プロセスからジョブとしてキューへ入れ、別プロセス（worker）で
+処理することを推奨します。主なコンポーネント：
+
+- `requirements.txt`: `redis`, `rq` を追加
+- `tools/worker.py`: RQ worker 起動スクリプト（開発用）
+- `tools/migrate_to_gcs.py`: 既存のローカル JSON を GCS に移行するためのスクリプト
+
+ローカルでの試験運用例:
+
+```bash
+# 1) Redis を起動（Docker で簡単に立てられます）
+docker run -d --name redis -p 6379:6379 redis:7
+
+# 2) 仮想環境をアクティベートして依存をインストール
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# 3) Web サーバを起動
+export PORT=5014
+python app.py
+
+# 4) 別ターミナルで worker を起動
+python tools/worker.py
+
+# 5) Web アプリから /summary を呼ぶとジョブをキューに投入します。
+#    クライアントは /summary のレスポンスで返される job_id を使って
+#    /summary/status/<job_id> をポーリングして結果を取得できます。
+```
+
+### GCS への既存ファイル移行
+ローカルに残っている `learning_progress.json` / `session_storage.json` / `summary_storage.json` を
+GCS に移行するためのスクリプトを `tools/migrate_to_gcs.py` として用意しました。環境変数
+`GCP_PROJECT_ID` と `GCS_BUCKET_NAME` を設定した上で実行してください。
+
+```bash
+export GCP_PROJECT_ID=your-project-id
+export GCS_BUCKET_NAME=your-bucket
+python tools/migrate_to_gcs.py
+```
+
+注意: Cloud Run 等のステートレス環境へデプロイする場合は、GCS/Firestore 等の外部ストレージを利用して
+データの永続化を行ってください。
+
+
+
 ---
 
 ## 📁 ディレクトリ構造

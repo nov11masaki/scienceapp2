@@ -205,6 +205,8 @@ document.addEventListener('DOMContentLoaded', function() {
             summaryButton.style.display = 'block';
             summaryButton.disabled = false;
         }
+    } else if (reflectionStatus.reflectionSummary && reflectionStatus.reflectionSummary.trim() !== '') {
+        renderReflectionSummary(reflectionStatus.reflectionSummary);
     }
     
     // 自動の API 再テストは行わない（ユーザー要望）
@@ -891,6 +893,36 @@ function isMeaningfulFinalSummary(summary) {
     return hasValidContent;
 }
 
+function renderReflectionSummary(summaryText) {
+    if (!summaryText) return false;
+    
+    const summaryContent = document.getElementById('summaryContent');
+    if (summaryContent) {
+        summaryContent.innerHTML = summaryText.replace(/\n/g, '<br>');
+        console.log('【DEBUG】summaryContent に要約を設定しました (reflection)');
+    }
+    
+    const summarySection = document.getElementById('summarySection');
+    if (summarySection) {
+        summarySection.style.display = 'block';
+        summarySection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    
+    const summaryButton = document.getElementById('summaryButton');
+    if (summaryButton) {
+        summaryButton.style.display = 'none';
+        summaryButton.disabled = true;
+    }
+    
+    const secondarySummaryBtn = document.getElementById('reflectionSummaryBtn');
+    if (secondarySummaryBtn) {
+        secondarySummaryBtn.style.display = 'none';
+        secondarySummaryBtn.disabled = true;
+    }
+    
+    return true;
+}
+
 function getSummary() {
     console.log('【DEBUG】getSummary 呼び出し');
     
@@ -960,17 +992,9 @@ function getSummary() {
         
         // 要約はチャット内に追加せず、上部のサマリー領域 (`summarySection`) にのみ表示する
         session['reflection_summary'] = data.summary;
-        const summaryContent = document.getElementById('summaryContent');
-        if (summaryContent) {
-            summaryContent.innerHTML = data.summary.replace(/\n/g, '<br>');
-            console.log('【DEBUG】summaryContent に要約を設定しました (reflection)');
-        }
-
-        // サマリーセクションを表示する（チャットはそのまま維持）
-        const summarySection = document.getElementById('summarySection');
-        if (summarySection) {
-            summarySection.style.display = 'block';
-        }
+        reflectionStatus.reflection_summary_created = true;
+        reflectionStatus.reflectionSummary = data.summary;
+        renderReflectionSummary(data.summary);
     })
     .catch(error => {
         console.error('【DEBUG】Summary Error:', error);
@@ -1066,4 +1090,3 @@ window.addEventListener('unhandledrejection', (event) => {
 
 </script>
 {% endblock %}
-

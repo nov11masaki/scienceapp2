@@ -22,12 +22,19 @@ COPY . .
 
 # ローカルストレージディレクトリを作成
 RUN mkdir -p /app/uploads && \
-    mkdir -p /app/logs
+    mkdir -p /app/logs && \
+    mkdir -p /data
 
 # 環境変数を設定
 ENV FLASK_ENV=production
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
+ENV LEARNING_PROGRESS_FILE=/data/learning_progress.json
+ENV SESSION_STORAGE_FILE=/data/session_storage.json
 
 # gunicornでFlaskアプリを実行
-CMD exec gunicorn --bind :${PORT} --workers 2 --threads 2 --timeout 60 --access-logfile - --error-logfile - app:app
+VOLUME ["/data"]
+
+# Production: use Waitress (installed via requirements.txt). We call the
+# waitress CLI so that the container runs the WSGI app with Waitress.
+CMD ["waitress-serve", "--listen=0.0.0.0:${PORT}", "app:app"]

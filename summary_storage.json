@@ -1,9 +1,16 @@
 {
-  "5_29_空気の温度と体積_prediction": {
-    "summary": "温めるとペットボトルがパンパンになったから、体積は大きくなると思う。だから、冷やすと小さくなると思う。",
-    "saved_at": "2025-11-26T16:58:51.608331",
-    "student_id": "5_29",
-    "unit": "空気の温度と体積",
+  "rika_1_unit1_prediction": {
+    "summary": "サンプル予想要約：物質は加熱で膨張します。",
+    "saved_at": "2025-11-26T00:00:00",
+    "student_id": "rika_1",
+    "unit": "unit1",
     "stage": "prediction"
+  },
+  "rika_2_unit2_reflection": {
+    "summary": "サンプル考察要約：温度上昇により分子運動が活発になります。",
+    "saved_at": "2025-11-26T00:00:00",
+    "student_id": "rika_2",
+    "unit": "unit2",
+    "stage": "reflection"
   }
 }

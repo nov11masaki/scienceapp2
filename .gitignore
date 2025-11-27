@@ -75,6 +75,7 @@ node_modules/
 # Temporary folders
 tmp/
 temp/
+backups/
 
 # Database
 *.db

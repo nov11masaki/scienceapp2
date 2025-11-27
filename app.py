@@ -20,13 +20,20 @@ from functools import lru_cache, wraps
 from werkzeug.utils import secure_filename
 import numpy as np
 from sklearn.cluster import KMeans
+import threading
+import tempfile as _tempfile
+import fcntl as _fcntl
+import errno as _errno
+import redis as _redis
+import rq as _rq
+from rq.job import Job as _RQJob
 
 
 # 環境変数を読み込み
 load_dotenv()
 
-# 学習進行状況管理用のファイルパス
-LEARNING_PROGRESS_FILE = 'learning_progress.json'
+# 学習進行状況管理用のファイルパス（環境変数で上書き可能）
+LEARNING_PROGRESS_FILE = os.environ.get('LEARNING_PROGRESS_FILE', 'learning_progress.json')
 PROMPTS_DIR = Path('prompts')
 
 # ストレージ設定：GCS（本番環境）またはローカルJSON（開発環境）
@@ -48,11 +55,214 @@ if USE_GCS:
 else:
     bucket = None
 
+# Firestore optional runtime storage
+USE_FIRESTORE = os.getenv('USE_FIRESTORE', '0').lower() in ('1', 'true', 'yes')
+FIRESTORE_DATABASE = os.getenv('FIRESTORE_DATABASE')  # e.g. 'rika' for non-default DB
+if USE_FIRESTORE:
+    try:
+        from storage import firestore_store
+        FIRESTORE_PROJECT = os.getenv('GCP_PROJECT_ID') or os.getenv('GCP_PROJECT') or None
+        # create a client (may raise if credentials/project/db invalid)
+        firestore_client = firestore_store.get_client(project=FIRESTORE_PROJECT, database=FIRESTORE_DATABASE)
+        print(f"[INIT] Firestore initialized project={firestore_client.project} database={FIRESTORE_DATABASE or '(default)'}")
+    except Exception as e:
+        print(f"[INIT] Firestore init failed: {e}")
+        USE_FIRESTORE = False
+        firestore_client = None
+else:
+    firestore_client = None
+
 # SSL証明書の設定
 ssl_context = ssl.create_default_context(cafile=certifi.where())
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'  # 本番環境では安全なキーに変更
+
+# File lock and atomic write utilities to avoid concurrent write corruption.
+# Uses fcntl.flock on Unix-like systems. Also provides an in-process
+# threading.Lock fallback for environments without fcntl.
+_file_locks = {}
+_file_locks_lock = threading.Lock()
+
+
+def _get_lock_for_path(path):
+    """Return a threading.Lock object for the given path (process-local).
+    This is used as a fallback for platforms without fcntl, and to
+    serialize atomic replace operations within the same process.
+    """
+    with _file_locks_lock:
+        lock = _file_locks.get(path)
+        if lock is None:
+            lock = threading.Lock()
+            _file_locks[path] = lock
+        return lock
+
+
+def _atomic_write_json(path, data):
+    """Atomically write JSON-serializable `data` to `path`.
+
+    Implementation details:
+    - Write to a temporary file in the same directory
+    - fsync the file and directory to ensure durability
+    - os.replace to atomically move into place
+    - Use an in-process lock to avoid races within the same process
+      and also use POSIX fcntl locks when available to coordinate
+      between processes on the same host.
+    """
+    import json
+    import os
+
+    dirpath = os.path.dirname(os.path.abspath(path)) or '.'
+    basename = os.path.basename(path)
+    tmp = None
+    lock = _get_lock_for_path(path)
+    with lock:
+        # create temp file in same directory
+        fd, tmp = _tempfile.mkstemp(prefix=basename, dir=dirpath)
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                # If fcntl available, acquire exclusive lock on temp file
+                try:
+                    _fcntl.flock(f.fileno(), _fcntl.LOCK_EX)
+                except Exception:
+                    pass
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except Exception:
+                    pass
+
+            # ensure directory entry is flushed
+            try:
+                dirfd = os.open(dirpath, os.O_DIRECTORY)
+                try:
+                    os.fsync(dirfd)
+                finally:
+                    os.close(dirfd)
+            except Exception:
+                pass
+
+            # atomic replace
+            os.replace(tmp, path)
+            tmp = None
+        finally:
+            if tmp and os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except Exception:
+                    pass
+
+
+def _read_json_file(path):
+    """Read JSON from path safely; returns parsed JSON or None if file missing/invalid."""
+    import json
+    import os
+
+    if not os.path.exists(path):
+        return None
+
+    lock = _get_lock_for_path(path)
+    with lock:
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                try:
+                    # Try to acquire shared lock where available
+                    _fcntl.flock(f.fileno(), _fcntl.LOCK_SH)
+                except Exception:
+                    pass
+                data = json.load(f)
+                return data
+        except Exception:
+            return None
+
+
+# 開発用: 重い要約処理を模擬するエンドポイント（POST）。
+# 本番で実行しないようにするため、簡易的に開発環境でのみ有効化する。
+@app.route('/debug/mock_summary', methods=['POST'])
+def debug_mock_summary():
+    """模擬的に時間のかかる処理をシミュレートする。
+    リクエストの JSON ボディは無視され、遅延後に簡易的なJSONを返す。
+    """
+    # 開発環境のみ有効化
+    if os.environ.get('FLASK_ENV') == 'production':
+        return jsonify({'error': 'not available in production'}), 403
+
+    import random
+    import time as _time
+
+    # シミュレート遅延: 0.6～1.2秒程度
+    delay = random.uniform(0.6, 1.2)
+    _time.sleep(delay)
+
+    # 簡易レスポンス
+    return jsonify({
+        'status': 'ok',
+        'mock_delay': round(delay, 3),
+        'summary': 'これはモックの要約です（開発用）'
+    })
+
+
+@app.route('/debug/save_session', methods=['POST'])
+def debug_save_session():
+    """開発用: セッション保存を模擬するエンドポイント。
+    受け取った JSON を session_storage に保存します。パラメータがない場合は
+    ランダムな student_id / unit / stage を生成します。
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        import random
+        student_id = data.get('student_id') or f"{random.randint(1,5)}_{random.randint(1,30)}"
+        unit = data.get('unit') or f"unit_{random.randint(1,10)}"
+        stage = data.get('stage') or random.choice(['prediction', 'reflection'])
+        conversation = data.get('conversation') or [{'role': 'user', 'content': 'テストメッセージ'}]
+
+        session_entry = {
+            'timestamp': datetime.now().isoformat(),
+            'student_id': student_id,
+            'unit': unit,
+            'stage': stage,
+            'conversation': conversation
+        }
+
+        # 既存の保存ヘルパーを利用
+        save_session_to_db(student_id, unit, stage, conversation)
+
+        return jsonify({'status': 'ok', 'student_id': student_id, 'unit': unit, 'stage': stage})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/debug/save_progress', methods=['POST'])
+def debug_save_progress():
+    """開発用: 学習進捗ファイルに対して頻繁に更新を行うエンドポイント。
+    リクエストボディがある場合はそれを使い、なければランダムな更新を行う。
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        import random
+        class_number = data.get('class_number') or str(random.randint(1,5))
+        student_number = data.get('student_number') or str(random.randint(1,30))
+        unit = data.get('unit') or f"unit_{random.randint(1,10)}"
+
+        # 進捗データを読み込み・更新（簡易）
+        progress = load_learning_progress()
+        student_id = f"{class_number}_{student_number}"
+        if student_id not in progress:
+            progress[student_id] = {}
+        if unit not in progress[student_id]:
+            progress[student_id][unit] = get_student_progress(class_number, student_number, unit)
+
+        # マーク予想/考察の作成フラグをトグルする（模擬）
+        current = progress[student_id][unit]
+        current['stage_progress']['prediction']['summary_created'] = True
+        current['stage_progress']['prediction']['last_message'] = '並行テストによる更新'
+
+        save_learning_progress(progress)
+
+        return jsonify({'status': 'ok', 'student_id': student_id, 'unit': unit})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'md', 'txt'}
@@ -164,7 +374,9 @@ def require_teacher_auth(f):
     return decorated_function
 
 # セッション管理機能（ブラウザ閉鎖後の復帰対応）
-SESSION_STORAGE_FILE = 'session_storage.json'
+# デフォルトはローカルファイルだが、コンテナ環境ではボリュームにマウントした
+# パスを環境変数 `SESSION_STORAGE_FILE` で指定して永続化できる。
+SESSION_STORAGE_FILE = os.environ.get('SESSION_STORAGE_FILE', 'session_storage.json')
 
 def save_session_to_db(student_id, unit, stage, conversation_data):
     """セッションデータをデータベースに保存（GCS優先、ローカルはフォールバック）"""
@@ -175,8 +387,17 @@ def save_session_to_db(student_id, unit, stage, conversation_data):
         'stage': stage,  # 'prediction' or 'reflection'
         'conversation': conversation_data
     }
-    
-    # 本番環境: GCS優先
+    # Firestore 優先（環境変数で有効化されている場合）
+    if USE_FIRESTORE and firestore_client:
+        try:
+            key = f"{student_id}_{unit}_{stage}"
+            firestore_client.collection('sb_session_storage').document(key).set(session_entry)
+            print(f"[SESSION_SAVE] Firestore - {key}")
+            return
+        except Exception as e:
+            print(f"[SESSION_SAVE] Firestore failed: {e}, falling back to next storage")
+
+    # 次に GCS を試行
     if USE_GCS and bucket:
         try:
             _save_session_gcs(session_entry)
@@ -184,26 +405,20 @@ def save_session_to_db(student_id, unit, stage, conversation_data):
             return  # GCS保存成功したらローカル保存は不要
         except Exception as e:
             print(f"[SESSION_SAVE] GCS failed: {e}, falling back to local")
-    
-    # 開発環境またはGCS失敗時: ローカル保存
+
+    # 開発環境または全失敗時: ローカル保存
     _save_session_local(session_entry)
 
 def _save_session_local(session_entry):
     """セッションをローカルファイルに保存"""
     try:
-        sessions = {}
-        if os.path.exists(SESSION_STORAGE_FILE):
-            with open(SESSION_STORAGE_FILE, 'r', encoding='utf-8') as f:
-                sessions = json.load(f)
-        
+        sessions = _read_json_file(SESSION_STORAGE_FILE) or {}
         student_id = session_entry['student_id']
         unit = session_entry['unit']
         stage = session_entry['stage']
         key = f"{student_id}_{unit}_{stage}"
         sessions[key] = session_entry
-        
-        with open(SESSION_STORAGE_FILE, 'w', encoding='utf-8') as f:
-            json.dump(sessions, f, ensure_ascii=False, indent=2)
+        _atomic_write_json(SESSION_STORAGE_FILE, sessions)
         print(f"[SESSION_SAVE] Local - {key}")
     except Exception as e:
         print(f"[SESSION_SAVE] Local Error: {e}")
@@ -249,12 +464,9 @@ def load_session_from_db(student_id, unit, stage):
 def _load_session_local(student_id, unit, stage):
     """セッションをローカルファイルから復元"""
     try:
-        if not os.path.exists(SESSION_STORAGE_FILE):
+        sessions = _read_json_file(SESSION_STORAGE_FILE)
+        if not sessions:
             return []
-        
-        with open(SESSION_STORAGE_FILE, 'r', encoding='utf-8') as f:
-            sessions = json.load(f)
-        
         key = f"{student_id}_{unit}_{stage}"
         if key in sessions:
             print(f"[SESSION_LOAD] Local - {key}")
@@ -263,6 +475,62 @@ def _load_session_local(student_id, unit, stage):
         print(f"[SESSION_LOAD] Local Error: {e}")
     
     return []
+
+
+# -----------------------------
+# Background job queue (RQ + Redis) setup
+# -----------------------------
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+try:
+    redis_conn = _redis.from_url(REDIS_URL)
+    rq_queue = _rq.Queue('default', connection=redis_conn)
+except Exception as e:
+    redis_conn = None
+    rq_queue = None
+
+
+def perform_summary_job(conversation, unit, student_id, class_number, student_number, stage='prediction', model_override='gpt-4o-mini'):
+    """Background job function: given a conversation and metadata, call OpenAI,
+    extract summary, save to storage (GCS or local), update progress and logs,
+    and return the summary text. This function is importable by RQ workers.
+    """
+    try:
+        # Build messages similarly to the synchronous handler
+        unit_prompt = load_unit_prompt(unit, stage='prediction')
+        summary_instruction = (
+            "以下の会話内容のみをもとに、児童の話した言葉や順序を活かして予想をまとめてください。"
+            "児童が自分のノートにそのまま写せる、短い1〜2文にしてください。"
+            "「〜と思う。なぜなら〜。」の形で、むずかしい言い回しや第三者目線は使わないでください。"
+            "会話に含まれていない内容や新しい事実は追加しないでください。"
+        )
+
+        messages = [{"role": "system", "content": f"{unit_prompt}\n\n【重要】{summary_instruction}"}]
+        for msg in conversation:
+            messages.append({"role": msg['role'], "content": msg['content']})
+        messages.append({"role": "user", "content": "これまでの話をもとに、予想をまとめてください。"})
+
+        # Call OpenAI (existing helper)
+        summary_response = call_openai_with_retry(messages, model_override=model_override, enable_cache=True, stage=stage)
+        summary_text = extract_message_from_json_response(summary_response)
+
+        # Persist summary
+        _save_summary_to_db(student_id, unit, stage, summary_text)
+
+        # Update progress and logs
+        try:
+            update_student_progress(class_number=class_number, student_number=student_number, unit=unit, prediction_summary_created=True)
+        except Exception:
+            pass
+
+        try:
+            save_learning_log(student_number=student_number, unit=unit, log_type='prediction_summary', data={'summary': summary_text, 'conversation': conversation}, class_number=class_number)
+        except Exception:
+            pass
+
+        return summary_text
+    except Exception as e:
+        print(f"[JOB_SUMMARY] Error: {e}")
+        raise
 
 def _load_session_gcs(student_id, unit, stage):
     """セッションをGCSから復元"""
@@ -329,30 +597,40 @@ def remove_markdown_formatting(text):
 def load_learning_progress():
     """学習進行状況を読み込み（ローカル JSON のみ）"""
     # ローカルファイルから読み込み
-    if os.path.exists(LEARNING_PROGRESS_FILE):
-        try:
-            with open(LEARNING_PROGRESS_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, Exception):
-            return {}
-    return {}
+    data = _read_json_file(LEARNING_PROGRESS_FILE)
+    if not data:
+        return {}
+    return data
 
 def save_learning_progress(progress_data):
     """学習進行状況を保存（ローカル JSON のみ）"""
-    # ローカルファイルに保存
+    # まず Firestore に保存（環境変数で有効化されていれば）
+    if USE_FIRESTORE and firestore_client:
+        try:
+            # progress_data は {student_id: {unit: {...}}}
+            batch = firestore_client.batch()
+            count = 0
+            for student_id, student_obj in progress_data.items():
+                doc_ref = firestore_client.collection('sb_learning_progress').document(str(student_id))
+                batch.set(doc_ref, student_obj)
+                count += 1
+                if count >= 500:
+                    batch.commit()
+                    batch = firestore_client.batch()
+                    count = 0
+            if count > 0:
+                batch.commit()
+            print(f"[PROGRESS_SAVE] Firestore: imported {len(progress_data)} student progress entries")
+            return
+        except Exception as e:
+            print(f"[PROGRESS_SAVE] Firestore failed: {e}, falling back to local file")
+
+    # ローカルファイルに保存（フォールバック）
     try:
-        with open(LEARNING_PROGRESS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(progress_data, f, ensure_ascii=False, indent=2)
+        _atomic_write_json(LEARNING_PROGRESS_FILE, progress_data)
         print(f"[PROGRESS_SAVE] Local file saved successfully")
     except Exception as e:
         print(f"[PROGRESS_SAVE] Error: {e}")
-    else:
-        # ローカルファイルに保存
-        try:
-            with open(LEARNING_PROGRESS_FILE, 'w', encoding='utf-8') as f:
-                json.dump(progress_data, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
 
 def get_student_progress(class_number, student_number, unit):
     """特定の学習者の単元進行状況を取得"""
@@ -1405,7 +1683,7 @@ def report_error():
 def summary():
     conversation = session.get('conversation', [])
     unit = session.get('unit')
-    
+
     # すでに要約が作成されている場合はスキップ
     if session.get('prediction_summary'):
         print(f"[SUMMARY] Already created: {session.get('prediction_summary')[:50]}...")
@@ -1475,52 +1753,30 @@ def summary():
     })
     
     try:
-        summary_response = call_openai_with_retry(
-            messages,
-            model_override="gpt-4o-mini",
-            enable_cache=True,
-            stage='prediction'
-        )
-        
-        # JSON形式のレスポンスの場合は解析して純粋なメッセージを抽出
-        summary_text = extract_message_from_json_response(summary_response)
-        
-        # セッションに保存してから、フラグとログを更新
-        session['prediction_summary'] = summary_text
-        session['prediction_summary_created'] = True
-        session.modified = True
-        
-        # 予想まとめを永続ストレージに保存（セッション切れ対策）
+        # Enqueue background job to generate and persist summary
         class_number = session.get('class_number')
         student_number = session.get('student_number')
         student_id = f"{class_number}_{student_number}"
-        _save_summary_to_db(student_id, unit, 'prediction', summary_text)
-        
-        print(f"[SUMMARY] Created and saved: {summary_text[:50]}...")
-        
-        # 予想完了フラグを設定
-        update_student_progress(
-            class_number=class_number,
-            student_number=student_number,
-            unit=unit,
-            prediction_summary_created=True
-        )
-        
-        # 予想まとめのログを保存
-        save_learning_log(
-            student_number=student_number,
-            unit=unit,
-            log_type='prediction_summary',
-            data={
-                'summary': summary_text,
-                'conversation': conversation
-            },
-            class_number=class_number
-        )
-        
-        return jsonify({'summary': summary_text})
+
+        if rq_queue is None:
+            # Fallback to synchronous processing if Redis/RQ not configured
+            summary_response = call_openai_with_retry(messages, model_override="gpt-4o-mini", enable_cache=True, stage='prediction')
+            summary_text = extract_message_from_json_response(summary_response)
+            session['prediction_summary'] = summary_text
+            session['prediction_summary_created'] = True
+            session.modified = True
+            _save_summary_to_db(student_id, unit, 'prediction', summary_text)
+            update_student_progress(class_number=class_number, student_number=student_number, unit=unit, prediction_summary_created=True)
+            save_learning_log(student_number=student_number, unit=unit, log_type='prediction_summary', data={'summary': summary_text, 'conversation': conversation}, class_number=class_number)
+            return jsonify({'summary': summary_text})
+
+        # Enqueue job
+        job = rq_queue.enqueue(perform_summary_job, args=(conversation, unit, student_id, class_number, student_number, 'prediction'), job_timeout=600)
+        print(f"[SUMMARY] Enqueued job: {job.id} for {student_id}_{unit}")
+        # Return job id so client can poll status
+        return jsonify({'job_id': job.id, 'status': 'queued'})
     except Exception as e:
-        return jsonify({'error': f'まとめ生成中にエラーが発生しました。'}), 500
+        return jsonify({'error': f'まとめ生成中にエラーが発生しました。', 'details': str(e)}), 500
 
 @app.route('/api/sync-session', methods=['POST'])
 def sync_session():
@@ -1562,6 +1818,22 @@ def sync_session():
 
 def _save_summary_to_db(student_id, unit, stage, summary_text):
     """サマリーを永続ストレージに保存（GCS優先、ローカルはフォールバック）"""
+    # Firestore 優先
+    if USE_FIRESTORE and firestore_client:
+        try:
+            key = f"{student_id}_{unit}_{stage}"
+            firestore_client.collection('sb_summary_storage').document(key).set({
+                'summary': summary_text,
+                'saved_at': datetime.now().isoformat(),
+                'student_id': student_id,
+                'unit': unit,
+                'stage': stage
+            })
+            print(f"[SUMMARY_SAVE] Firestore - {key}")
+            return
+        except Exception as e:
+            print(f"[SUMMARY_SAVE] Firestore failed: {e}, falling back to next storage")
+
     # 本番環境: GCS優先
     if USE_GCS and bucket:
         try:
@@ -1610,6 +1882,24 @@ def _save_summary_local(student_id, unit, stage, summary_text):
     except Exception as e:
         print(f"[SUMMARY_SAVE_LOCAL] Error: {e}")
 
+
+@app.route('/summary/status/<job_id>', methods=['GET'])
+def summary_status(job_id):
+    """Return job status and result (if finished)."""
+    try:
+        if redis_conn is None:
+            return jsonify({'error': 'Redis not configured', 'status': 'unavailable'}), 503
+
+        job = _RQJob.fetch(job_id, connection=redis_conn)
+        status = job.get_status()
+        if job.is_finished:
+            return jsonify({'status': status, 'summary': job.result})
+        if job.is_failed:
+            return jsonify({'status': 'failed', 'error': str(job.exc_info)}), 500
+        return jsonify({'status': status})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 def _save_summary_gcs(student_id, unit, stage, summary_text):
     """サマリーをGCSに保存"""
     try:
@@ -1638,6 +1928,18 @@ def _save_summary_gcs(student_id, unit, stage, summary_text):
 
 def _load_summary_from_db(student_id, unit, stage):
     """サマリーをデータベースから取得（GCS優先）"""
+    # Firestore 優先
+    if USE_FIRESTORE and firestore_client:
+        try:
+            key = f"{student_id}_{unit}_{stage}"
+            doc = firestore_client.collection('sb_summary_storage').document(key).get()
+            if doc.exists:
+                data = doc.to_dict()
+                print(f"[SUMMARY_LOAD] Firestore - {key}")
+                return data.get('summary', '')
+        except Exception as e:
+            print(f"[SUMMARY_LOAD] Firestore failed: {e}, trying next storage")
+
     # 本番環境: GCS優先
     if USE_GCS and bucket:
         try:
@@ -1647,7 +1949,7 @@ def _load_summary_from_db(student_id, unit, stage):
                 return summary
         except Exception as e:
             print(f"[SUMMARY_LOAD] GCS failed: {e}, trying local")
-    
+
     # 開発環境またはGCS失敗時: ローカルから取得
     summary = _load_summary_local(student_id, unit, stage)
     if summary:
@@ -1951,6 +2253,11 @@ def final_summary():
         # 要約段階ではマークダウン除去をスキップ（MDファイルのプロンプトに従う）
         # final_summary_text = remove_markdown_formatting(final_summary_text)
         
+        # セッションに保存（フロントの復元用）
+        session['reflection_summary'] = final_summary_text
+        session['reflection_summary_created'] = True
+        session.modified = True
+        
         # 考察完了フラグを設定
         update_student_progress(
             class_number=session.get('class_number'),
@@ -1958,6 +2265,10 @@ def final_summary():
             unit=session.get('unit'),
             reflection_summary_created=True
         )
+        
+        # 永続ストレージに保存（ローカル/GCS）
+        student_id = f"{session.get('class_number')}_{session.get('student_number')}"
+        _save_summary_to_db(student_id, unit, 'reflection', final_summary_text)
         
         # 最終考察のログを保存
         save_learning_log(
@@ -2919,4 +3230,11 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5014))
     # 本番環境ではdebug=False
     debug_mode = os.environ.get('FLASK_ENV') != 'production'
-    app.run(debug=debug_mode, host='0.0.0.0', port=port)
+    # Try to use Waitress if available (recommended for production on Windows/macOS)
+    try:
+        from waitress import serve
+        # When using Waitress, disable Flask's debugger
+        serve(app, host='0.0.0.0', port=port)
+    except Exception:
+        # Fallback to Flask's built-in server for development
+        app.run(debug=debug_mode, host='0.0.0.0', port=port)
