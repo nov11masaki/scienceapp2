@@ -485,14 +485,24 @@ def _load_session_local(student_id, unit, stage):
 
 # -----------------------------
 # Background job queue (RQ + Redis) setup
+# Make RQ optional: enable by setting USE_RQ=1 in environment.
+# Default is disabled to simplify deployments (Cloud Run without external workers).
 # -----------------------------
+USE_RQ = os.getenv('USE_RQ', '0').lower() in ('1', 'true', 'yes')
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
-try:
-    redis_conn = _redis.from_url(REDIS_URL)
-    rq_queue = _rq.Queue('default', connection=redis_conn)
-except Exception as e:
+if USE_RQ:
+    try:
+        redis_conn = _redis.from_url(REDIS_URL)
+        rq_queue = _rq.Queue('default', connection=redis_conn)
+        print(f"[STARTUP] RQ enabled, REDIS_URL present: {bool(os.getenv('REDIS_URL'))}")
+    except Exception as e:
+        print(f"[STARTUP] RQ initialization failed: {e}")
+        redis_conn = None
+        rq_queue = None
+else:
     redis_conn = None
     rq_queue = None
+    print("[STARTUP] RQ disabled (USE_RQ not set). Using synchronous processing.")
 
 
 def perform_summary_job(conversation, unit, student_id, class_number, student_number, stage='prediction', model_override='gpt-4o-mini'):
