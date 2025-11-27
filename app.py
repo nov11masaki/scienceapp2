@@ -24,9 +24,9 @@ import threading
 import tempfile as _tempfile
 import fcntl as _fcntl
 import errno as _errno
-import redis as _redis
-import rq as _rq
-from rq.job import Job as _RQJob
+# redis/rq imports are optional and performed only when USE_RQ is enabled
+# to avoid import-time errors in production environments that do not
+# run a Redis server or background workers.
 
 
 # 環境変数を読み込み
@@ -490,18 +490,36 @@ def _load_session_local(student_id, unit, stage):
 # -----------------------------
 USE_RQ = os.getenv('USE_RQ', '0').lower() in ('1', 'true', 'yes')
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+
+# Initialize defaults
+redis_conn = None
+rq_queue = None
+_RQJob = None
+
 if USE_RQ:
     try:
-        redis_conn = _redis.from_url(REDIS_URL)
-        rq_queue = _rq.Queue('default', connection=redis_conn)
+        # Import here so that environments without redis/rq installed
+        # (e.g. lightweight production containers) do not fail to start.
+        import redis as _redis_local
+        import rq as _rq_local
+        from rq.job import Job as _RQJob_local
+
+        redis_conn = _redis_local.from_url(REDIS_URL)
+        rq_queue = _rq_local.Queue('default', connection=redis_conn)
+        _RQJob = _RQJob_local
         print(f"[STARTUP] RQ enabled, REDIS_URL present: {bool(os.getenv('REDIS_URL'))}")
+    except ImportError as ie:
+        print(f"[STARTUP] RQ packages not installed: {ie}. Disabling RQ.")
+        USE_RQ = False
+        redis_conn = None
+        rq_queue = None
+        _RQJob = None
     except Exception as e:
         print(f"[STARTUP] RQ initialization failed: {e}")
         redis_conn = None
         rq_queue = None
+        _RQJob = None
 else:
-    redis_conn = None
-    rq_queue = None
     print("[STARTUP] RQ disabled (USE_RQ not set). Using synchronous processing.")
 
 
@@ -1966,14 +1984,16 @@ def _save_summary_local(student_id, unit, stage, summary_text):
 def summary_status(job_id):
     """Return job status and result (if finished)."""
     try:
-        if redis_conn is None:
-            return jsonify({'error': 'Redis not configured', 'status': 'unavailable'}), 503
+        # If RQ is not enabled or not available, report that status check
+        # is unavailable rather than attempting to import/fetch jobs.
+        if not USE_RQ or redis_conn is None or _RQJob is None:
+            return jsonify({'error': 'RQ not enabled in this deployment', 'status': 'unavailable'}), 503
 
         job = _RQJob.fetch(job_id, connection=redis_conn)
         status = job.get_status()
-        if job.is_finished:
+        if getattr(job, 'is_finished', False):
             return jsonify({'status': status, 'summary': job.result})
-        if job.is_failed:
+        if getattr(job, 'is_failed', False):
             return jsonify({'status': 'failed', 'error': str(job.exc_info)}), 500
         return jsonify({'status': status})
     except Exception as e:
