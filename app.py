@@ -2338,11 +2338,13 @@ def final_summary():
         _save_summary_to_db(student_id, unit, 'reflection', final_summary_text)
         
         # 最終考察のログを保存
+        # Save final summary using both 'summary' and legacy 'final_summary' keys
         save_learning_log(
             student_number=session.get('student_number'),
             unit=session.get('unit'),
             log_type='final_summary',
             data={
+                'summary': final_summary_text,
                 'final_summary': final_summary_text,
                 'prediction_summary': prediction_summary,
                 'reflection_conversation': reflection_conversation
@@ -2605,7 +2607,8 @@ def teacher_export():
         elif log.get('log_type') == 'reflection_chat':
             content = f"Q: {log['data'].get('user_message', '')}\nA: {log['data'].get('ai_response', '')}"
         elif log.get('log_type') == 'final_summary':
-            content = log['data'].get('final_summary', '')
+            # Prefer 'summary' key, fall back to legacy 'final_summary'
+            content = log['data'].get('summary', log['data'].get('final_summary', ''))
         
         writer.writerow({
             'timestamp': log.get('timestamp', ''),
