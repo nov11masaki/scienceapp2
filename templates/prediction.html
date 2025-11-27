@@ -29,7 +29,7 @@
                         <i class="fas fa-seedling"></i>
                         今回のやること
                     </h5>
-                    <p class="task-content">温めたとき・冷やしたときに空気がどうなるかを予想しよう。前に見たり感じた体験を思い出して伝えてね。</p>
+                    <p class="task-content">{{ task_content | replace('\n', '<br>') | safe }}</p>
                 </div>
             </div>
 
