@@ -37,7 +37,13 @@ LEARNING_PROGRESS_FILE = os.environ.get('LEARNING_PROGRESS_FILE', 'learning_prog
 PROMPTS_DIR = Path('prompts')
 
 # ストレージ設定：GCS（本番環境）またはローカルJSON（開発環境）
-USE_GCS = os.getenv('FLASK_ENV') == 'production' and os.getenv('GCP_PROJECT_ID')
+# 本番では FLASK_ENV=production のほか Cloud Run の環境変数 (K_SERVICE) や
+# 明示的なフラグ `USE_GCS=1` によって GCS を有効化できます。
+USE_GCS = (
+    (os.getenv('FLASK_ENV') == 'production')
+    or bool(os.getenv('K_SERVICE'))
+    or os.getenv('USE_GCS') == '1'
+) and bool(os.getenv('GCP_PROJECT_ID'))
 
 if USE_GCS:
     try:
@@ -1505,6 +1511,13 @@ def prediction():
     session['class_number'] = class_number
     session['student_number'] = student_number
     session['unit'] = unit
+    # 明示的にセッションの状態を初期化して、前の段階のプロンプトや会話が残らないようにする
+    task_content = load_task_content(unit) if unit else ''
+    session['task_content'] = task_content
+    session['current_stage'] = 'reflection'
+    # 予想段階の対話履歴と混在しないように会話履歴もクリアしておく
+    session['conversation'] = []
+    session.modified = True
     
     task_content = load_task_content(unit)
     session['task_content'] = task_content
@@ -1776,7 +1789,25 @@ def summary():
         # Return job id so client can poll status
         return jsonify({'job_id': job.id, 'status': 'queued'})
     except Exception as e:
-        return jsonify({'error': f'まとめ生成中にエラーが発生しました。', 'details': str(e)}), 500
+        import traceback
+        tb = traceback.format_exc()
+        # Print detailed traceback to server logs for debugging
+        print(f"[SUMMARY_ERROR] {type(e).__name__}: {e}")
+        print(f"[SUMMARY_ERROR] Traceback:\n{tb}")
+        # Also persist an error log entry for later inspection
+        try:
+            save_error_log(
+                student_number=session.get('student_number'),
+                class_number=session.get('class_number'),
+                error_message=str(e),
+                error_type='summary_exception',
+                stage='prediction',
+                unit=unit,
+                additional_info={'traceback': tb[:1000]}
+            )
+        except Exception:
+            pass
+        return jsonify({'error': f'まとめ生成中にエラーが発生しました。'}), 500
 
 @app.route('/api/sync-session', methods=['POST'])
 def sync_session():
@@ -2033,6 +2064,14 @@ def reflection():
     session.pop('reflection_summary', None)
     session.pop('reflection_summary_created', None)
     session['reflection_conversation'] = []
+
+    # 明示的にセッションの状態を初期化して、前の段階のプロンプトや会話が残らないようにする
+    task_content = load_task_content(unit) if unit else ''
+    session['task_content'] = task_content
+    session['current_stage'] = 'reflection'
+    # 予想段階の対話履歴と混在しないように会話履歴もクリアしておく
+    session['conversation'] = []
+    session.modified = True
     
     # 予想まとめがセッションに存在しない場合はストレージから復元
     student_id = f"{class_number}_{student_number}"

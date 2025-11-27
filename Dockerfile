@@ -15,7 +15,13 @@ RUN apt-get update && apt-get install -y \
 
 # Pythonの依存関係をインストール
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Upgrade pip/setuptools/wheel first to avoid resolver issues and print requirements for debugging
+RUN python -m pip install --upgrade pip setuptools wheel \
+    && pip --version \
+    && echo "--- requirements.txt ---" \
+    && cat requirements.txt \
+    && echo "------------------------" \
+    && pip install --no-cache-dir -r requirements.txt
 
 # アプリケーションコードをコピー
 COPY . .
@@ -35,6 +41,6 @@ ENV SESSION_STORAGE_FILE=/data/session_storage.json
 # gunicornでFlaskアプリを実行
 VOLUME ["/data"]
 
-# Production: use Waitress (installed via requirements.txt). We call the
-# waitress CLI so that the container runs the WSGI app with Waitress.
-CMD ["waitress-serve", "--listen=0.0.0.0:${PORT}", "app:app"]
+# Use gunicorn to serve the Flask app. Use shell form so `$PORT` is expanded
+# from environment variables at container start time.
+CMD gunicorn --bind 0.0.0.0:$PORT app:app
