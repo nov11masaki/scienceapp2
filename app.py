@@ -30,17 +30,20 @@ LEARNING_PROGRESS_FILE = 'learning_progress.json'
 PROMPTS_DIR = Path('prompts')
 
 # ストレージ設定：GCS（本番環境）またはローカルJSON（開発環境）
-USE_GCS = os.getenv('FLASK_ENV') == 'production' and os.getenv('GCP_PROJECT_ID')
+# Cloud Run や GCP 環境では `GCP_PROJECT_ID` (または `GOOGLE_CLOUD_PROJECT`) を設定することで
+# 自動的に GCS 保存を有効化します。以前は FLASK_ENV が 'production' のときのみ有効化していましたが
+# Cloud Run などでは必ずしも FLASK_ENV を設定しないため、より寛容にしています。
+gcp_project = os.getenv('GCP_PROJECT_ID') or os.getenv('GOOGLE_CLOUD_PROJECT')
+USE_GCS = bool(gcp_project)
 
 if USE_GCS:
     try:
         from google.cloud import storage
-        gcp_project = os.getenv('GCP_PROJECT_ID')
         storage_client = storage.Client(project=gcp_project)
         bucket_name = os.getenv('GCS_BUCKET_NAME', 'science-buddy-logs')
         bucket = storage_client.bucket(bucket_name)
-        # バケット接続確認
-        print(f"[INIT] GCS bucket '{bucket_name}' initialized successfully")
+        # バケット接続確認（存在確認は遅延させる）
+        print(f"[INIT] GCS integration enabled for project '{gcp_project}', bucket='{bucket_name}'")
     except Exception as e:
         print(f"[INIT] Warning: GCS initialization failed: {e}")
         USE_GCS = False
