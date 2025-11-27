@@ -564,6 +564,15 @@ try:
 except Exception as e:
     client = None
 
+# Startup diagnostic logging: print which integrations are enabled (do not print secrets)
+print(f"[STARTUP] OPENAI_API_KEY present: {bool(api_key)}")
+print(f"[STARTUP] USE_GCS: {USE_GCS}, bucket configured: {bool(bucket)}")
+print(f"[STARTUP] USE_FIRESTORE: {USE_FIRESTORE}, firestore_client: {bool(firestore_client)}")
+try:
+    print(f"[STARTUP] REDIS_URL set: {bool(os.getenv('REDIS_URL'))}, rq_queue initialized: {bool(rq_queue)}")
+except Exception:
+    pass
+
 # マークダウン記法を除去する関数
 def remove_markdown_formatting(text):
     """AIの応答からマークダウン記法を除去する"""
@@ -1784,17 +1793,32 @@ def summary():
             return jsonify({'summary': summary_text})
 
         # Enqueue job
-        job = rq_queue.enqueue(perform_summary_job, args=(conversation, unit, student_id, class_number, student_number, 'prediction'), job_timeout=600)
-        print(f"[SUMMARY] Enqueued job: {job.id} for {student_id}_{unit}")
-        # Return job id so client can poll status
-        return jsonify({'job_id': job.id, 'status': 'queued'})
+        try:
+            job = rq_queue.enqueue(perform_summary_job, args=(conversation, unit, student_id, class_number, student_number, 'prediction'), job_timeout=600)
+            print(f"[SUMMARY] Enqueued job: {job.id} for {student_id}_{unit}")
+            # Return job id so client can poll status
+            return jsonify({'job_id': job.id, 'status': 'queued'})
+        except ValueError as ve:
+            # Happens when the function is defined in __main__ and cannot be serialized for workers
+            print(f"[SUMMARY] RQ enqueue failed (falling back to sync): {ve}")
+            # Fallback to synchronous processing
+            summary_response = call_openai_with_retry(messages, model_override="gpt-4o-mini", enable_cache=True, stage='prediction')
+            summary_text = extract_message_from_json_response(summary_response)
+            session['prediction_summary'] = summary_text
+            session['prediction_summary_created'] = True
+            session.modified = True
+            _save_summary_to_db(student_id, unit, 'prediction', summary_text)
+            update_student_progress(class_number=class_number, student_number=student_number, unit=unit, prediction_summary_created=True)
+            save_learning_log(student_number=student_number, unit=unit, log_type='prediction_summary', data={'summary': summary_text, 'conversation': conversation}, class_number=class_number)
+            return jsonify({'summary': summary_text})
     except Exception as e:
         import traceback
         tb = traceback.format_exc()
         # Print detailed traceback to server logs for debugging
         print(f"[SUMMARY_ERROR] {type(e).__name__}: {e}")
         print(f"[SUMMARY_ERROR] Traceback:\n{tb}")
-        # Also persist an error log entry for later inspection
+
+        # Persist an error log entry for later inspection
         try:
             save_error_log(
                 student_number=session.get('student_number'),
@@ -1807,6 +1831,19 @@ def summary():
             )
         except Exception:
             pass
+
+        # Additionally write full traceback to a dedicated log file for quick inspection
+        try:
+            os.makedirs('logs', exist_ok=True)
+            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+            trace_file = f'logs/summary_traceback_{ts}.log'
+            with open(trace_file, 'w', encoding='utf-8') as tf:
+                tf.write(f"ERROR: {type(e).__name__}: {e}\n\n")
+                tf.write(tb)
+            print(f"[SUMMARY_ERROR] Full traceback written to {trace_file}")
+        except Exception as ex:
+            print(f"[SUMMARY_ERROR] Failed to write traceback file: {ex}")
+
         return jsonify({'error': f'まとめ生成中にエラーが発生しました。'}), 500
 
 @app.route('/api/sync-session', methods=['POST'])
