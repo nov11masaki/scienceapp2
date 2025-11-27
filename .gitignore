@@ -60,6 +60,11 @@ pids
 *.seed
 *.pid.lock
 
+# Runtime JSON files (local ephemeral state) - keep these out of git
+learning_progress.json
+session_storage.json
+summary_storage.json
+
 # Coverage directory used by tools like istanbul
 coverage/
 
