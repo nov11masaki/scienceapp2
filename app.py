@@ -1759,6 +1759,14 @@ def reflection():
     session.pop('reflection_summary', None)
     session.pop('reflection_summary_created', None)
     session['reflection_conversation'] = []
+
+    # 明示的にセッションの状態を初期化して、前の段階のプロンプトや会話が残らないようにする
+    task_content = load_task_content(unit) if unit else ''
+    session['task_content'] = task_content
+    session['current_stage'] = 'reflection'
+    # 予想段階の対話履歴と混在しないように会話履歴もクリアしておく
+    session['conversation'] = []
+    session.modified = True
     
     # 予想まとめがセッションに存在しない場合はストレージから復元
     student_id = f"{class_number}_{student_number}"
