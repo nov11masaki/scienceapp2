@@ -15,7 +15,13 @@ RUN apt-get update && apt-get install -y \
 
 # Pythonの依存関係をインストール
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Upgrade pip/setuptools/wheel first to avoid resolver issues and print requirements for debugging
+RUN python -m pip install --upgrade pip setuptools wheel \
+    && pip --version \
+    && echo "--- requirements.txt ---" \
+    && cat requirements.txt \
+    && echo "------------------------" \
+    && pip install --no-cache-dir -r requirements.txt
 
 # アプリケーションコードをコピー
 COPY . .
@@ -29,5 +35,4 @@ ENV FLASK_ENV=production
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
 
-# gunicornでFlaskアプリを実行
-CMD exec gunicorn --bind :${PORT} --workers 2 --threads 2 --timeout 60 --access-logfile - --error-logfile - app:app
+# gunic
