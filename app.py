@@ -974,6 +974,39 @@ def get_initial_ai_message(unit_name, stage='prediction'):
             message = "あなたの考えを聞かせてください。"
     
     return message
+
+
+def load_unit_prompt(unit_name, stage='reflection'):
+    """Load a per-unit prompt file from the `prompts/` directory.
+
+    The function looks for files named like `<unit>_<stage>.md` (e.g. `空気の温度と体積_reflection.md`).
+    If not found, returns an empty string.
+    """
+    try:
+        safe_name = unit_name.replace('/', '_')
+        filename = f"prompts/{safe_name}_{stage}.md"
+        with open(filename, 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
+
+
+def render_prompt_template(template_text, **context):
+    """Simple placeholder renderer for prompt files.
+
+    Replaces occurrences of `{{key}}` with `str(context['key'])` when present.
+    This is intentionally lightweight (no external templating dependency).
+    """
+    if not template_text:
+        return ""
+
+    def _replace(match):
+        key = match.group(1).strip()
+        return str(context.get(key, match.group(0)))
+
+    import re
+    rendered = re.sub(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}", _replace, template_text)
+    return rendered
 def save_learning_log(student_number, unit, log_type, data, class_number=None):
     """
     Save a learning log entry locally and optionally to GCS.

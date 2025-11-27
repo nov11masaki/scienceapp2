@@ -41,6 +41,8 @@ ENV SESSION_STORAGE_FILE=/data/session_storage.json
 # gunicornでFlaskアプリを実行
 VOLUME ["/data"]
 
-# Use gunicorn to serve the Flask app. Use shell form so `$PORT` is expanded
-# from environment variables at container start time.
-CMD gunicorn --bind 0.0.0.0:$PORT app:app
+# Use gunicorn to serve the Flask app. Use exec (JSON) form to ensure signals
+# are delivered correctly. We bind to port 8080 (Cloud Run sets $PORT to 8080 by
+# default). If you must honor a different $PORT, consider adding an entrypoint
+# script that expands environment variables before exec.
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app:app"]
