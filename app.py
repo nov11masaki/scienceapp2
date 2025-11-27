@@ -1794,7 +1794,8 @@ def summary():
 
         # Enqueue job
         try:
-            job = rq_queue.enqueue(perform_summary_job, args=(conversation, unit, student_id, class_number, student_number, 'prediction'), job_timeout=600)
+            # Enqueue by import path string to avoid "Functions from the __main__ module" pickle error
+            job = rq_queue.enqueue('app.perform_summary_job', args=(conversation, unit, student_id, class_number, student_number, 'prediction'), job_timeout=600)
             print(f"[SUMMARY] Enqueued job: {job.id} for {student_id}_{unit}")
             # Return job id so client can poll status
             return jsonify({'job_id': job.id, 'status': 'queued'})
