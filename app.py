@@ -975,50 +975,46 @@ def get_initial_ai_message(unit_name, stage='prediction'):
     
     return message
 
-# 単元ごとのプロンプトを読み込む関数
-def load_unit_prompt(unit_name, stage=None):
-    """単元専用のプロンプトファイルを読み込む
-    
-    Args:
-        unit_name: 単元名
-        stage: 学習段階 ('prediction' または 'reflection')
-    """
-    try:
-        # stageが指定されている場合、段階別プロンプトを読み込む
-        if stage:
-            stage_suffix = "_prediction" if stage == "prediction" else "_reflection"
-            prompt_path = PROMPTS_DIR / f"{unit_name}{stage_suffix}.md"
-        else:
-            # 従来の単一プロンプトにフォールバック
-            prompt_path = PROMPTS_DIR / f"{unit_name}.md"
-        
-        with open(prompt_path, 'r', encoding='utf-8') as f:
-            return f.read().strip()
-    except FileNotFoundError:
-        return "児童の発言をよく聞いて、適切な質問で考えを引き出してください。"
+     # 考察段階のシステムプロンプトを構築
+     # 目的: 常に「1) 実験結果を確認 -> 2) 予想と簡単に比較 -> 3) さらに考えを引き出す」の順で
+     # 段階的に問いかけるよう、明確に指示する。可能なら直前の児童発話を踏まえて次の質問を決める。
+     reflection_system_prompt = f"""
+あなたは小学4年生の理科学習を支援するAIアシスタントです。現在、児童が実験後の「考察段階」に入っています。
 
-def load_prompt_template(filename):
-    """汎用テンプレートを読み込み"""
-    try:
-        template_path = PROMPTS_DIR / filename
-        with open(template_path, 'r', encoding='utf-8') as f:
-            return f.read()
-    except FileNotFoundError:
-        print(f"[PROMPTS] Warning: template '{filename}' not found")
-        return ""
+指示（絶対に守ること）:
+- 1往復ごとに1つの応答だけ返す（短く、やさしい日本語）。
+- 児童の言葉を最優先で受け止め、そのまま活かす（引用する場合は「〜なんだね」等で受け止める）。
+- 専門用語は使わない。児童の言葉だけでまとめる。児童が「まとめボタン」を押すまで長いまとめは出さない。
 
-def render_prompt_template(template: str, **placeholders):
-    """テンプレート内の{{KEY}}を置換"""
-    rendered = template
-    for key, value in placeholders.items():
-        rendered = rendered.replace(f"{{{{{key}}}}}", str(value) if value is not None else "")
-    return rendered
+必ず従う対話の順序（厳守）:
+1) 実験結果を聞く（または、児童が直前に結果を述べていればそれを受け止める）
+    - 例: 「じっけんではどんなけっかになった？」
+    - もし児童が既に結果を言っている場合は: 「〜って言ってたんだね。さいしょの予そうと比べるとどうだった？」に続ける。
 
+2) 予想との簡単な比較（必ず行う）
+    - ここで必ず現在の`予想`（下に表示）と比較すること。簡潔に「同じ/ちがう/わからない」を確認するだけでよい。
+    - 表示されている現在の予想: "{prediction_summary or '（予想がまだ記録されていません）'}"
+    - 例: 「さいしょの予そうと同じだった？ちがってた？」
 
-# 学習ログを保存する関数
-def save_learning_log(student_number, unit, log_type, data, class_number=None):
-    """学習ログをGCSまたはローカルJSONに保存
-    
+3) 児童の考え・気づきを引き出す（ここが最重要）
+    - 例: 「それってなぜだと思う？」「何か気づいたことってある？」
+    - 1〜2往復で十分。児童が出した言葉をそのまままとめに使う。
+
+注意点:
+- 予想との比較は短くする（深掘りはしない）。
+- 同じ質問を繰り返して堂々巡りしない。既に児童が答えたことを尊重し、次の段階（比較→考え）に進む。
+- 児童が詰まる場合のみ、身近な例を1つ提示して助ける（例: 「冷蔵庫に入れたペットボトルはどうなった？」）。
+
+単元の指導内容:
+{unit_prompt}
+
+児童の予想:
+{prediction_summary or '予想がまだ記録されていません。'}
+
+出力形式:
+- 自然な対話文（ラベルなし）、短く1文〜数文。児童の表現を活かす。
+- まずは順番通りに問いを進め、各問いは1つか2つの短いフォローで止める。
+"""
     Args:
         student_number: 生徒番号 (例: "4103"=1組3番, "5015"=研究室15番) または出席番号
         unit: 単元名
