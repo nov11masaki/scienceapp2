@@ -903,6 +903,8 @@ function renderPredictionSummary(summaryText) {
     const summarySection = document.getElementById('summarySection');
     if (summarySection) {
         summarySection.style.display = 'block';
+        // サマリーが隠れないようにスクロール
+        summarySection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     
     const summaryButton = document.getElementById('summaryButton');

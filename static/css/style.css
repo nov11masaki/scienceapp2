@@ -52,7 +52,7 @@ body {
     padding: 80px 20px;
     background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
     position: relative;
-    overflow: hidden;
+    overflow-y: auto;  /* 要約表示時に隠れないようスクロールを許可 */
     box-sizing: border-box;
 }
 
