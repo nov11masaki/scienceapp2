@@ -1231,6 +1231,13 @@ def prediction():
     session['class_number'] = class_number
     session['student_number'] = student_number
     session['unit'] = unit
+    # 明示的にセッションの状態を初期化して、前の段階のプロンプトや会話が残らないようにする
+    task_content = load_task_content(unit) if unit else ''
+    session['task_content'] = task_content
+    session['current_stage'] = 'reflection'
+    # 予想段階の対話履歴と混在しないように会話履歴もクリアしておく
+    session['conversation'] = []
+    session.modified = True
     
     task_content = load_task_content(unit)
     session['task_content'] = task_content
@@ -1523,6 +1530,24 @@ def summary():
         
         return jsonify({'summary': summary_text})
     except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        # Print detailed traceback to server logs for debugging
+        print(f"[SUMMARY_ERROR] {type(e).__name__}: {e}")
+        print(f"[SUMMARY_ERROR] Traceback:\n{tb}")
+        # Also persist an error log entry for later inspection
+        try:
+            save_error_log(
+                student_number=session.get('student_number'),
+                class_number=session.get('class_number'),
+                error_message=str(e),
+                error_type='summary_exception',
+                stage='prediction',
+                unit=unit,
+                additional_info={'traceback': tb[:1000]}
+            )
+        except Exception:
+            pass
         return jsonify({'error': f'まとめ生成中にエラーが発生しました。'}), 500
 
 @app.route('/api/sync-session', methods=['POST'])
