@@ -974,16 +974,15 @@ def get_initial_ai_message(unit_name, stage='prediction'):
             message = "あなたの考えを聞かせてください。"
     
     return message
+def save_learning_log(student_number, unit, log_type, data, class_number=None):
+    """
+    Save a learning log entry locally and optionally to GCS.
 
-     # 単元ごとの reflection 用プロンプトファイルをそのままシステムプロンプトとして使用します。
-     # prompt ファイル側で「結果→予想との比較→さらに考えを引き出す」の順序を明記してください。
-     # もしプロンプト内にプレースホルダがあれば置換します（例: {{prediction_summary}}）。
-     reflection_system_prompt = render_prompt_template(unit_prompt or "", prediction_summary=prediction_summary)
     Args:
-        student_number: 生徒番号 (例: "4103"=1組3番, "5015"=研究室15番) または出席番号
+        student_number: 生徒番号 (例: "4103"=1組3番) または出席番号
         unit: 単元名
         log_type: ログタイプ
-        data: ログデータ
+        data: ログデータ (dict)
         class_number: クラス番号 (例: "1", "2") - 省略時は student_number から自動解析
     """
     class_number = normalize_class_value(class_number) or class_number
