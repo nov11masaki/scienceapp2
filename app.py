@@ -24,9 +24,9 @@ import threading
 import tempfile as _tempfile
 import fcntl as _fcntl
 import errno as _errno
-# redis/rq imports are optional and performed only when USE_RQ is enabled
-# to avoid import-time errors in production environments that do not
-# run a Redis server or background workers.
+import redis as _redis
+import rq as _rq
+from rq.job import Job as _RQJob
 
 
 # 環境変数を読み込み
@@ -485,42 +485,14 @@ def _load_session_local(student_id, unit, stage):
 
 # -----------------------------
 # Background job queue (RQ + Redis) setup
-# Make RQ optional: enable by setting USE_RQ=1 in environment.
-# Default is disabled to simplify deployments (Cloud Run without external workers).
 # -----------------------------
-USE_RQ = os.getenv('USE_RQ', '0').lower() in ('1', 'true', 'yes')
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
-
-# Initialize defaults
-redis_conn = None
-rq_queue = None
-_RQJob = None
-
-if USE_RQ:
-    try:
-        # Import here so that environments without redis/rq installed
-        # (e.g. lightweight production containers) do not fail to start.
-        import redis as _redis_local
-        import rq as _rq_local
-        from rq.job import Job as _RQJob_local
-
-        redis_conn = _redis_local.from_url(REDIS_URL)
-        rq_queue = _rq_local.Queue('default', connection=redis_conn)
-        _RQJob = _RQJob_local
-        print(f"[STARTUP] RQ enabled, REDIS_URL present: {bool(os.getenv('REDIS_URL'))}")
-    except ImportError as ie:
-        print(f"[STARTUP] RQ packages not installed: {ie}. Disabling RQ.")
-        USE_RQ = False
-        redis_conn = None
-        rq_queue = None
-        _RQJob = None
-    except Exception as e:
-        print(f"[STARTUP] RQ initialization failed: {e}")
-        redis_conn = None
-        rq_queue = None
-        _RQJob = None
-else:
-    print("[STARTUP] RQ disabled (USE_RQ not set). Using synchronous processing.")
+try:
+    redis_conn = _redis.from_url(REDIS_URL)
+    rq_queue = _rq.Queue('default', connection=redis_conn)
+except Exception as e:
+    redis_conn = None
+    rq_queue = None
 
 
 def perform_summary_job(conversation, unit, student_id, class_number, student_number, stage='prediction', model_override='gpt-4o-mini'):
@@ -591,15 +563,6 @@ try:
     client = openai.OpenAI(api_key=api_key)
 except Exception as e:
     client = None
-
-# Startup diagnostic logging: print which integrations are enabled (do not print secrets)
-print(f"[STARTUP] OPENAI_API_KEY present: {bool(api_key)}")
-print(f"[STARTUP] USE_GCS: {USE_GCS}, bucket configured: {bool(bucket)}")
-print(f"[STARTUP] USE_FIRESTORE: {USE_FIRESTORE}, firestore_client: {bool(firestore_client)}")
-try:
-    print(f"[STARTUP] REDIS_URL set: {bool(os.getenv('REDIS_URL'))}, rq_queue initialized: {bool(rq_queue)}")
-except Exception:
-    pass
 
 # マークダウン記法を除去する関数
 def remove_markdown_formatting(text):
@@ -975,47 +938,55 @@ def get_initial_ai_message(unit_name, stage='prediction'):
     
     return message
 
-
-def load_unit_prompt(unit_name, stage='reflection'):
-    """Load a per-unit prompt file from the `prompts/` directory.
-
-    The function looks for files named like `<unit>_<stage>.md` (e.g. `空気の温度と体積_reflection.md`).
-    If not found, returns an empty string.
+# 単元ごとのプロンプトを読み込む関数
+def load_unit_prompt(unit_name, stage=None):
+    """単元専用のプロンプトファイルを読み込む
+    
+    Args:
+        unit_name: 単元名
+        stage: 学習段階 ('prediction' または 'reflection')
     """
     try:
-        safe_name = unit_name.replace('/', '_')
-        filename = f"prompts/{safe_name}_{stage}.md"
-        with open(filename, 'r', encoding='utf-8') as f:
+        # stageが指定されている場合、段階別プロンプトを読み込む
+        if stage:
+            stage_suffix = "_prediction" if stage == "prediction" else "_reflection"
+            prompt_path = PROMPTS_DIR / f"{unit_name}{stage_suffix}.md"
+        else:
+            # 従来の単一プロンプトにフォールバック
+            prompt_path = PROMPTS_DIR / f"{unit_name}.md"
+        
+        with open(prompt_path, 'r', encoding='utf-8') as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return "児童の発言をよく聞いて、適切な質問で考えを引き出してください。"
+
+def load_prompt_template(filename):
+    """汎用テンプレートを読み込み"""
+    try:
+        template_path = PROMPTS_DIR / filename
+        with open(template_path, 'r', encoding='utf-8') as f:
             return f.read()
     except FileNotFoundError:
+        print(f"[PROMPTS] Warning: template '{filename}' not found")
         return ""
 
-
-def render_prompt_template(template_text, **context):
-    """Simple placeholder renderer for prompt files.
-
-    Replaces occurrences of `{{key}}` with `str(context['key'])` when present.
-    This is intentionally lightweight (no external templating dependency).
-    """
-    if not template_text:
-        return ""
-
-    def _replace(match):
-        key = match.group(1).strip()
-        return str(context.get(key, match.group(0)))
-
-    import re
-    rendered = re.sub(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}", _replace, template_text)
+def render_prompt_template(template: str, **placeholders):
+    """テンプレート内の{{KEY}}を置換"""
+    rendered = template
+    for key, value in placeholders.items():
+        rendered = rendered.replace(f"{{{{{key}}}}}", str(value) if value is not None else "")
     return rendered
-def save_learning_log(student_number, unit, log_type, data, class_number=None):
-    """
-    Save a learning log entry locally and optionally to GCS.
 
+
+# 学習ログを保存する関数
+def save_learning_log(student_number, unit, log_type, data, class_number=None):
+    """学習ログをGCSまたはローカルJSONに保存
+    
     Args:
-        student_number: 生徒番号 (例: "4103"=1組3番) または出席番号
+        student_number: 生徒番号 (例: "4103"=1組3番, "5015"=研究室15番) または出席番号
         unit: 単元名
         log_type: ログタイプ
-        data: ログデータ (dict)
+        data: ログデータ
         class_number: クラス番号 (例: "1", "2") - 省略時は student_number から自動解析
     """
     class_number = normalize_class_value(class_number) or class_number
@@ -1813,33 +1784,17 @@ def summary():
             return jsonify({'summary': summary_text})
 
         # Enqueue job
-        try:
-            # Enqueue by import path string to avoid "Functions from the __main__ module" pickle error
-            job = rq_queue.enqueue('app.perform_summary_job', args=(conversation, unit, student_id, class_number, student_number, 'prediction'), job_timeout=600)
-            print(f"[SUMMARY] Enqueued job: {job.id} for {student_id}_{unit}")
-            # Return job id so client can poll status
-            return jsonify({'job_id': job.id, 'status': 'queued'})
-        except ValueError as ve:
-            # Happens when the function is defined in __main__ and cannot be serialized for workers
-            print(f"[SUMMARY] RQ enqueue failed (falling back to sync): {ve}")
-            # Fallback to synchronous processing
-            summary_response = call_openai_with_retry(messages, model_override="gpt-4o-mini", enable_cache=True, stage='prediction')
-            summary_text = extract_message_from_json_response(summary_response)
-            session['prediction_summary'] = summary_text
-            session['prediction_summary_created'] = True
-            session.modified = True
-            _save_summary_to_db(student_id, unit, 'prediction', summary_text)
-            update_student_progress(class_number=class_number, student_number=student_number, unit=unit, prediction_summary_created=True)
-            save_learning_log(student_number=student_number, unit=unit, log_type='prediction_summary', data={'summary': summary_text, 'conversation': conversation}, class_number=class_number)
-            return jsonify({'summary': summary_text})
+        job = rq_queue.enqueue(perform_summary_job, args=(conversation, unit, student_id, class_number, student_number, 'prediction'), job_timeout=600)
+        print(f"[SUMMARY] Enqueued job: {job.id} for {student_id}_{unit}")
+        # Return job id so client can poll status
+        return jsonify({'job_id': job.id, 'status': 'queued'})
     except Exception as e:
         import traceback
         tb = traceback.format_exc()
         # Print detailed traceback to server logs for debugging
         print(f"[SUMMARY_ERROR] {type(e).__name__}: {e}")
         print(f"[SUMMARY_ERROR] Traceback:\n{tb}")
-
-        # Persist an error log entry for later inspection
+        # Also persist an error log entry for later inspection
         try:
             save_error_log(
                 student_number=session.get('student_number'),
@@ -1852,19 +1807,6 @@ def summary():
             )
         except Exception:
             pass
-
-        # Additionally write full traceback to a dedicated log file for quick inspection
-        try:
-            os.makedirs('logs', exist_ok=True)
-            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-            trace_file = f'logs/summary_traceback_{ts}.log'
-            with open(trace_file, 'w', encoding='utf-8') as tf:
-                tf.write(f"ERROR: {type(e).__name__}: {e}\n\n")
-                tf.write(tb)
-            print(f"[SUMMARY_ERROR] Full traceback written to {trace_file}")
-        except Exception as ex:
-            print(f"[SUMMARY_ERROR] Failed to write traceback file: {ex}")
-
         return jsonify({'error': f'まとめ生成中にエラーが発生しました。'}), 500
 
 @app.route('/api/sync-session', methods=['POST'])
@@ -1976,16 +1918,14 @@ def _save_summary_local(student_id, unit, stage, summary_text):
 def summary_status(job_id):
     """Return job status and result (if finished)."""
     try:
-        # If RQ is not enabled or not available, report that status check
-        # is unavailable rather than attempting to import/fetch jobs.
-        if not USE_RQ or redis_conn is None or _RQJob is None:
-            return jsonify({'error': 'RQ not enabled in this deployment', 'status': 'unavailable'}), 503
+        if redis_conn is None:
+            return jsonify({'error': 'Redis not configured', 'status': 'unavailable'}), 503
 
         job = _RQJob.fetch(job_id, connection=redis_conn)
         status = job.get_status()
-        if getattr(job, 'is_finished', False):
+        if job.is_finished:
             return jsonify({'status': status, 'summary': job.result})
-        if getattr(job, 'is_failed', False):
+        if job.is_failed:
             return jsonify({'status': 'failed', 'error': str(job.exc_info)}), 500
         return jsonify({'status': status})
     except Exception as e:
@@ -2370,13 +2310,11 @@ def final_summary():
         _save_summary_to_db(student_id, unit, 'reflection', final_summary_text)
         
         # 最終考察のログを保存
-        # Save final summary using both 'summary' and legacy 'final_summary' keys
         save_learning_log(
             student_number=session.get('student_number'),
             unit=session.get('unit'),
             log_type='final_summary',
             data={
-                'summary': final_summary_text,
                 'final_summary': final_summary_text,
                 'prediction_summary': prediction_summary,
                 'reflection_conversation': reflection_conversation
@@ -2639,8 +2577,7 @@ def teacher_export():
         elif log.get('log_type') == 'reflection_chat':
             content = f"Q: {log['data'].get('user_message', '')}\nA: {log['data'].get('ai_response', '')}"
         elif log.get('log_type') == 'final_summary':
-            # Prefer 'summary' key, fall back to legacy 'final_summary'
-            content = log['data'].get('summary', log['data'].get('final_summary', ''))
+            content = log['data'].get('final_summary', '')
         
         writer.writerow({
             'timestamp': log.get('timestamp', ''),
