@@ -893,22 +893,39 @@ def call_openai_with_retry(prompt, max_retries=3, delay=2, unit=None, stage=None
             if cache_enabled:
                 print(f"[OPENAI_CACHE] Prompt caching enabled for model: {model_name}")
 
+            # モデルによってトークン制限パラメータを切り替え
+            # gpt-4o-2024-08-06以降のモデルはmax_completion_tokensを使用
+            token_param = {}
+            if 'o1' in model_name or '2024-08' in model_name or '2025' in model_name:
+                token_param['max_completion_tokens'] = 2000
+            else:
+                token_param['max_tokens'] = 2000
+
             response = client.chat.completions.create(
                 model=model_name,
                 messages=messages,
-                max_tokens=2000,
                 temperature=temperature,
-                timeout=30
+                timeout=30,
+                **token_param
             )
             
             # トークン使用状況とキャッシュヒット率をログ出力
             if hasattr(response, 'usage'):
                 usage = response.usage
+                # キャッシュトークン数を取得（prompt_tokens_detailsはオブジェクトまたは辞書）
+                cached_tokens = 0
+                if hasattr(usage, 'prompt_tokens_details'):
+                    details = usage.prompt_tokens_details
+                    if hasattr(details, 'cached_tokens'):
+                        cached_tokens = details.cached_tokens
+                    elif isinstance(details, dict):
+                        cached_tokens = details.get('cached_tokens', 0)
+                
                 print(f"[OPENAI_USAGE] Model: {model_name}, "
                       f"Prompt tokens: {getattr(usage, 'prompt_tokens', 'N/A')}, "
                       f"Completion tokens: {getattr(usage, 'completion_tokens', 'N/A')}, "
                       f"Total: {getattr(usage, 'total_tokens', 'N/A')}, "
-                      f"Cached tokens: {getattr(usage, 'prompt_tokens_details', {}).get('cached_tokens', 0) if hasattr(usage, 'prompt_tokens_details') else 0}")
+                      f"Cached tokens: {cached_tokens}")
             
             if response.choices and response.choices[0].message.content:
                 content = response.choices[0].message.content
