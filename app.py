@@ -490,7 +490,9 @@ REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 try:
     redis_conn = _redis.from_url(REDIS_URL)
     rq_queue = _rq.Queue('default', connection=redis_conn)
+    print(f"[INIT] Redis/RQ initialized successfully at {REDIS_URL}")
 except Exception as e:
+    print(f"[INIT] Redis/RQ not available: {e}. Will use synchronous processing.")
     redis_conn = None
     rq_queue = None
 
@@ -1795,13 +1797,20 @@ def summary():
     
     try:
         # Debug: log whether FORCE_SYNC_SUMMARY is set and PID
-        force_sync = os.environ.get('FORCE_SYNC_SUMMARY', 'false').lower() in ('1', 'true', 'yes')
-        print(f"[SUMMARY] PID:{os.getpid()} FORCE_SYNC_SUMMARY={force_sync} rq_queue_present={rq_queue is not None}")
+        try:
+            force_sync = os.environ.get('FORCE_SYNC_SUMMARY', 'false').lower() in ('1', 'true', 'yes')
+            print(f"[SUMMARY] PID:{os.getpid()} FORCE_SYNC_SUMMARY={force_sync} rq_queue_present={rq_queue is not None}")
+        except Exception as env_err:
+            print(f"[SUMMARY] Warning: Could not read FORCE_SYNC_SUMMARY: {env_err}")
+            force_sync = False
 
         # Enqueue background job to generate and persist summary
         class_number = session.get('class_number')
         student_number = session.get('student_number')
         student_id = f"{class_number}_{student_number}"
+        
+        print(f"[SUMMARY] Starting summary for {student_id}_{unit}, force_sync={force_sync}")
+        
         # If FORCE_SYNC_SUMMARY is enabled, perform synchronous generation here
         if force_sync:
             try:
@@ -1823,15 +1832,29 @@ def summary():
 
         if rq_queue is None:
             # Fallback to synchronous processing if Redis/RQ not configured
-            summary_response = call_openai_with_retry(messages, model_override="gpt-4o-mini", enable_cache=True, stage='prediction')
-            summary_text = extract_message_from_json_response(summary_response)
-            session['prediction_summary'] = summary_text
-            session['prediction_summary_created'] = True
-            session.modified = True
-            _save_summary_to_db(student_id, unit, 'prediction', summary_text)
-            update_student_progress(class_number=class_number, student_number=student_number, unit=unit, prediction_summary_created=True)
-            save_learning_log(student_number=student_number, unit=unit, log_type='prediction_summary', data={'summary': summary_text, 'conversation': conversation}, class_number=class_number)
-            return jsonify({'summary': summary_text})
+            print(f"[SUMMARY] RQ queue not available, using synchronous processing")
+            try:
+                print(f"[SUMMARY] Step 1: Calling OpenAI API...")
+                summary_response = call_openai_with_retry(messages, model_override="gpt-4o-mini", enable_cache=True, stage='prediction')
+                print(f"[SUMMARY] Step 2: Extracting message from response...")
+                summary_text = extract_message_from_json_response(summary_response)
+                print(f"[SUMMARY] Step 3: Saving to session... (length: {len(summary_text)})")
+                session['prediction_summary'] = summary_text
+                session['prediction_summary_created'] = True
+                session.modified = True
+                print(f"[SUMMARY] Step 4: Saving to database...")
+                _save_summary_to_db(student_id, unit, 'prediction', summary_text)
+                print(f"[SUMMARY] Step 5: Updating progress...")
+                update_student_progress(class_number=class_number, student_number=student_number, unit=unit, prediction_summary_created=True)
+                print(f"[SUMMARY] Step 6: Saving learning log...")
+                save_learning_log(student_number=student_number, unit=unit, log_type='prediction_summary', data={'summary': summary_text, 'conversation': conversation}, class_number=class_number)
+                print(f"[SUMMARY] Synchronous summary completed for {student_id}_{unit}")
+                return jsonify({'summary': summary_text})
+            except Exception as sync_err:
+                print(f"[SUMMARY_ERROR] Synchronous processing failed at step: {sync_err}")
+                import traceback
+                traceback.print_exc()
+                raise
 
         # Enqueue job
         job = rq_queue.enqueue(perform_summary_job, args=(conversation, unit, student_id, class_number, student_number, 'prediction'), job_timeout=600)
