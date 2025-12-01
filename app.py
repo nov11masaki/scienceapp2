@@ -564,8 +564,8 @@ def _load_session_gcs(student_id, unit, stage):
 # OpenAI APIの設定
 api_key = os.getenv('OPENAI_API_KEY')
 # デフォルトモデル（環境変数で変更可能）
-# gpt-4o-mini: 66倍安い + プロンプトキャッシング対応
-DEFAULT_OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
+# gpt-5-nano: 最新の軽量モデル + プロンプトキャッシング対応
+DEFAULT_OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-5-nano')
 try:
     client = openai.OpenAI(api_key=api_key)
     print(f"[INIT] OpenAI client initialized with model: {DEFAULT_OPENAI_MODEL}")
