@@ -789,6 +789,42 @@ def extract_message_from_json_response(response):
     except (json.JSONDecodeError, Exception) as e:
         return response
 
+
+def has_substantive_content(text):
+    """短い文字数判定ではなく、意味のある発言かを判定する軽量ヘルパー。
+    
+    非常に緩い基準を採用：
+    - 長さ2文字以上のトークンが1つでもあればOK
+    - キーワード（観察・経験・理由を示す語）を含む場合も有意と判断
+    - 空文字や意味のない1文字の羅列のみを除外
+    """
+    try:
+        import re
+        if not text or len(text.strip()) == 0:
+            return False
+
+        # 代表的な日本語の経験/理由を示す語句（簡易）
+        keywords = [
+            'あった', 'あります', '見た', '見ました', '思う', '思います',
+            'なった', 'になった', 'だから', 'ため', 'ことが', '見', 'できた', 
+            '変わ', '気づ', '観察', '理由', '大きく', '小さく', '温', '冷',
+            'なる', 'ます', 'です', 'から', 'ので'
+        ]
+        for k in keywords:
+            if k in text:
+                return True
+
+        # 記号等をスペースに置換してトークン化
+        cleaned = re.sub(r"[^\w\u3040-\u30ff\u4e00-\u9fff]", ' ', text)
+        tokens = [t for t in re.split(r'\s+', cleaned) if t and len(t) >= 2]
+        # 長さ2以上のトークンが1つでもあればOK
+        if len(tokens) >= 1:
+            return True
+
+        return False
+    except Exception:
+        return False
+
 # APIコール用のリトライ関数
 def call_openai_with_retry(prompt, max_retries=3, delay=2, unit=None, stage=None, model_override=None, enable_cache=False, temperature=None):
     """OpenAI APIを呼び出し、エラー時はリトライする
@@ -1715,26 +1751,18 @@ def summary():
     # ユーザー発言の内容をチェック
     user_content = ' '.join([msg['content'] for msg in user_messages])
     
-    # 非常に短い発言のみ（有意な情報がない）
-    if len(user_content) < 10:
-        return jsonify({
-            'error': 'もっと詳しく教えてください。どう思ったのか、何かあったのか、話してみてね。',
-            'is_insufficient': True
-        }), 400
-    
-    # ユーザーの有意な発言があるかチェック（経験や理由を含むか）
-    # キーワード：経験を示す言葉
-    experience_keywords = ['あった', 'あります', '見た', '見ました', '思う', '思います', 'なった', 'になった', '〜だから', 'ため', 'ことがあ']
-    has_meaningful_content = any(keyword in user_content for keyword in experience_keywords)
-    
-    # 2回以上のラリーがあれば、意味がなくても頑張ってまとめる
+    # 文字数による判定はやめ、意味的に有意な発言かを判定する
     exchange_count = len(user_messages)
     
-    if not has_meaningful_content and exchange_count < 2:
-        return jsonify({
-            'error': 'あなたの考えが伝わりきっていないようです。どういうわけでそう思ったの？何か見たことや経験があれば教えてね。',
-            'is_insufficient': True
-        }), 400
+    # 非常に緩い判定：2回以上のやりとりがあれば無条件でOK
+    # 1回のみの場合も、少しでも内容があればOK
+    if exchange_count < 2:
+        # 1回のみの場合、内容が極端に空でなければOK
+        if len(user_content.strip()) < 2:
+            return jsonify({
+                'error': 'あなたの考えが伝わりきっていないようです。どういうわけでそう思ったの？何か見たことや経験があれば教えてね。',
+                'is_insufficient': True
+            }), 400
     
     # 単元のプロンプトを読み込み（予想段階の指示を必ず参照）
     unit_prompt = load_unit_prompt(unit, stage='prediction')
@@ -1766,10 +1794,32 @@ def summary():
     })
     
     try:
+        # Debug: log whether FORCE_SYNC_SUMMARY is set and PID
+        force_sync = os.environ.get('FORCE_SYNC_SUMMARY', 'false').lower() in ('1', 'true', 'yes')
+        print(f"[SUMMARY] PID:{os.getpid()} FORCE_SYNC_SUMMARY={force_sync} rq_queue_present={rq_queue is not None}")
+
         # Enqueue background job to generate and persist summary
         class_number = session.get('class_number')
         student_number = session.get('student_number')
         student_id = f"{class_number}_{student_number}"
+        # If FORCE_SYNC_SUMMARY is enabled, perform synchronous generation here
+        if force_sync:
+            try:
+                summary_response = call_openai_with_retry(messages, model_override="gpt-4o-mini", enable_cache=True, stage='prediction')
+                summary_text = extract_message_from_json_response(summary_response)
+                session['prediction_summary'] = summary_text
+                session['prediction_summary_created'] = True
+                session.modified = True
+                _save_summary_to_db(student_id, unit, 'prediction', summary_text)
+                update_student_progress(class_number=class_number, student_number=student_number, unit=unit, prediction_summary_created=True)
+                save_learning_log(student_number=student_number, unit=unit, log_type='prediction_summary', data={'summary': summary_text, 'conversation': conversation}, class_number=class_number)
+                print(f"[SUMMARY] Synchronous summary generated for {student_id}_{unit}")
+                return jsonify({'summary': summary_text})
+            except Exception as e:
+                print(f"[SUMMARY_ERROR] Synchronous summary generation failed: {e}")
+                import traceback
+                traceback.print_exc()
+                # Fall through to enqueue path if sync failed
 
         if rq_queue is None:
             # Fallback to synchronous processing if Redis/RQ not configured
@@ -2241,26 +2291,18 @@ def final_summary():
     # ユーザー発言の内容をチェック
     user_content = ' '.join([msg['content'] for msg in user_messages])
     
-    # 非常に短い発言のみ（有意な情報がない）
-    if len(user_content) < 10:
-        return jsonify({
-            'error': 'もっと詳しく教えてください。実験ではどんなことが起きた？どう思った？',
-            'is_insufficient': True
-        }), 400
-    
-    # ユーザーの有意な発言があるかチェック（観察や気づきを含むか）
-    # キーワード：観察や変化を示す言葉
-    experience_keywords = ['なった', 'になった', '見た', '見ました', '変わ', 'できた', '思う', '思います', 'だから', 'ため', 'ことがあ']
-    has_meaningful_content = any(keyword in user_content for keyword in experience_keywords)
-    
-    # 2回以上のラリーがあれば、意味がなくても頑張ってまとめる
+    # 文字数による判定は廃止し、意味的に有意かで判定する
     exchange_count = len(user_messages)
     
-    if not has_meaningful_content and exchange_count < 2:
-        return jsonify({
-            'error': 'あなたの考えが伝わりきっていないようです。どんな結果になった？予想と同じだった？ちがった？',
-            'is_insufficient': True
-        }), 400
+    # 非常に緩い判定：2回以上のやりとりがあれば無条件でOK
+    # 1回のみの場合も、少しでも内容があればOK
+    if exchange_count < 2:
+        # 1回のみの場合、内容が極端に空でなければOK
+        if len(user_content.strip()) < 2:
+            return jsonify({
+                'error': 'あなたの考えが伝わりきっていないようです。どんな結果になった？予想と同じだった？ちがった？',
+                'is_insufficient': True
+            }), 400
     
     # 単元のプロンプトを読み込み（考察段階用）
     unit_prompt = load_unit_prompt(unit, stage='reflection')
