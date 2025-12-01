@@ -563,10 +563,15 @@ def _load_session_gcs(student_id, unit, stage):
 
 # OpenAI APIの設定
 api_key = os.getenv('OPENAI_API_KEY')
+# デフォルトモデル（環境変数で変更可能）
+# gpt-4o-mini: 66倍安い + プロンプトキャッシング対応
+DEFAULT_OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
 try:
     client = openai.OpenAI(api_key=api_key)
+    print(f"[INIT] OpenAI client initialized with model: {DEFAULT_OPENAI_MODEL}")
 except Exception as e:
     client = None
+    print(f"[INIT] OpenAI client initialization failed: {e}")
 
 # マークダウン記法を除去する関数
 def remove_markdown_formatting(text):
@@ -848,16 +853,21 @@ def call_openai_with_retry(prompt, max_retries=3, delay=2, unit=None, stage=None
     
     # promptがリストの場合（メッセージフォーマット）
     if isinstance(prompt, list):
-        messages = prompt
+        messages = prompt.copy()  # 元のリストを変更しないようにコピー
     else:
         # promptが文字列の場合（従来フォーマット）
         messages = [{"role": "user", "content": prompt}]
     
     # キャッシング有効時、システムメッセージにキャッシュ制御を追加
+    # OpenAI Prompt Cachingはシステムメッセージの再利用でInput tokensを50%削減
     if enable_cache:
-        for msg in messages:
-            if msg.get('role') == 'system':
-                msg['cache_control'] = {'type': 'ephemeral'}
+        for i, msg in enumerate(messages):
+            if msg.get('role') == 'system' and 'cache_control' not in msg:
+                # 元のメッセージを変更せず、新しい辞書を作成
+                messages[i] = {
+                    **msg,
+                    'cache_control': {'type': 'ephemeral'}
+                }
     
     for attempt in range(max_retries):
         try:
@@ -875,7 +885,13 @@ def call_openai_with_retry(prompt, max_retries=3, delay=2, unit=None, stage=None
                 else:
                     temperature = 0.5  # デフォルト
             
-            model_name = model_override if model_override else "gpt-4o-mini"
+            # モデル選択: model_override > DEFAULT_OPENAI_MODEL > gpt-4o-mini
+            model_name = model_override if model_override else DEFAULT_OPENAI_MODEL
+            
+            # プロンプトキャッシングの状態をログ出力
+            cache_enabled = any(msg.get('cache_control') for msg in messages)
+            if cache_enabled:
+                print(f"[OPENAI_CACHE] Prompt caching enabled for model: {model_name}")
 
             response = client.chat.completions.create(
                 model=model_name,
@@ -884,6 +900,15 @@ def call_openai_with_retry(prompt, max_retries=3, delay=2, unit=None, stage=None
                 temperature=temperature,
                 timeout=30
             )
+            
+            # トークン使用状況とキャッシュヒット率をログ出力
+            if hasattr(response, 'usage'):
+                usage = response.usage
+                print(f"[OPENAI_USAGE] Model: {model_name}, "
+                      f"Prompt tokens: {getattr(usage, 'prompt_tokens', 'N/A')}, "
+                      f"Completion tokens: {getattr(usage, 'completion_tokens', 'N/A')}, "
+                      f"Total: {getattr(usage, 'total_tokens', 'N/A')}, "
+                      f"Cached tokens: {getattr(usage, 'prompt_tokens_details', {}).get('cached_tokens', 0) if hasattr(usage, 'prompt_tokens_details') else 0}")
             
             if response.choices and response.choices[0].message.content:
                 content = response.choices[0].message.content
