@@ -489,6 +489,8 @@ def _load_session_local(student_id, unit, stage):
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 try:
     redis_conn = _redis.from_url(REDIS_URL)
+    # Test the connection before creating the queue
+    redis_conn.ping()
     rq_queue = _rq.Queue('default', connection=redis_conn)
     print(f"[INIT] Redis/RQ initialized successfully at {REDIS_URL}")
 except Exception as e:
