@@ -60,6 +60,11 @@ pids
 *.seed
 *.pid.lock
 
+# Test and development files
+cookies.txt
+test_cookies.txt
+*_cookies.txt
+
 # Runtime JSON files (local ephemeral state) - keep these out of git
 learning_progress.json
 session_storage.json
