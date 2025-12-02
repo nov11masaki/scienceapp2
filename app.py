@@ -19,8 +19,18 @@ import tempfile
 from pathlib import Path
 from functools import lru_cache, wraps
 from werkzeug.utils import secure_filename
-import numpy as np
-from sklearn.cluster import KMeans
+
+# Optional analysis libraries (may not be available in all environments)
+try:
+    import numpy as np
+    from sklearn.cluster import KMeans
+    ANALYSIS_LIBS_AVAILABLE = True
+except ImportError as e:
+    print(f"[INIT] Warning: Analysis libraries not available: {e}")
+    np = None
+    KMeans = None
+    ANALYSIS_LIBS_AVAILABLE = False
+
 import threading
 import tempfile as _tempfile
 import fcntl as _fcntl
@@ -3032,13 +3042,35 @@ def teacher_analysis():
     
     try:
         # ログを読み込み
+        print(f"[ANALYSIS] Loading logs for date={date}, unit={unit}")
         logs = load_learning_logs(date)
+        print(f"[ANALYSIS] Loaded {len(logs)} logs")
         
         if unit:
             logs = [log for log in logs if log.get('unit') == unit]
+            print(f"[ANALYSIS] Filtered to {len(logs)} logs for unit={unit}")
         
-        # 分析を実行
-        analysis_result = analyze_predictions_and_reflections(logs)
+        # 分析を実行（エラーが起きても部分的な結果を返す）
+        try:
+            analysis_result = analyze_predictions_and_reflections(logs)
+            print(f"[ANALYSIS] Analysis completed successfully")
+        except Exception as analysis_err:
+            print(f"[ANALYSIS] Analysis failed: {analysis_err}")
+            import traceback
+            traceback.print_exc()
+            # 最小限の結果を返す
+            analysis_result = {
+                'total_logs': len(logs),
+                'prediction_chats': len([l for l in logs if l.get('log_type') == 'prediction_chat']),
+                'reflection_chats': len([l for l in logs if l.get('log_type') == 'reflection_chat']),
+                'predictions_by_unit': {},
+                'reflections_by_unit': {},
+                'text_analysis': {},
+                'embeddings_analysis': {},
+                'insights': {},
+                'prompt_recommendations': {},
+                'error': str(analysis_err)
+            }
         
         return jsonify({
             'success': True,
@@ -3048,10 +3080,14 @@ def teacher_analysis():
             'log_count': len(logs)
         })
     except Exception as e:
-        print(f"[ANALYSIS] Error: {e}")
+        print(f"[ANALYSIS] Fatal error: {e}")
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({
+            'success': False, 
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
 
 
 def analyze_predictions_and_reflections(logs):
@@ -3159,6 +3195,16 @@ def analyze_predictions_and_reflections(logs):
 def analyze_with_embeddings(prediction_messages, reflection_messages, unit):
     """埋め込み + クラスタリング分析"""
     try:
+        # Check if analysis libraries are available
+        if not ANALYSIS_LIBS_AVAILABLE or np is None or KMeans is None:
+            print(f"[EMBEDDINGS] Skipping - analysis libraries not available")
+            return {
+                'clusters': [], 
+                'cluster_count': 0, 
+                'skipped': True,
+                'reason': 'Analysis libraries (numpy/sklearn) not available'
+            }
+        
         all_messages = prediction_messages + reflection_messages
         if len(all_messages) < 2:
             return {'clusters': [], 'cluster_count': 0}
