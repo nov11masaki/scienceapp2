@@ -869,36 +869,6 @@ function getChatMessages() {
     return messages;
 }
 
-// 要約が実質的な意味を持つかチェック
-function isMeaningfulSummary(summary) {
-    console.log('【DEBUG】isMeaningfulSummary チェック:', summary);
-    
-    // 最小文字数チェック（さらに緩和: 5文字以上）
-    if (!summary || summary.trim().length < 5) {
-        console.log('【DEBUG】文字数が不足:', summary.trim().length);
-        return false;
-    }
-    
-    // 無意味な連続文字（記号や同じ文字の繰り返し）をチェック
-    const meaninglessPatterns = /([ヴァslmv]{2,}|[ぁぃぅぇぉ]{3,}|~~~|~~~|\.\.\.|【【|】】)/g;
-    const meaninglessMatches = (summary.match(meaninglessPatterns) || []).length;
-    
-    // 無意味な文字列の割合が高い場合はNG
-    if (meaninglessMatches > 0) {
-        const totalWords = summary.split(/[\s、。]/g).length;
-        if (meaninglessMatches / totalWords > 0.3) {
-            console.log('【DEBUG】無意味な文字列が多すぎる');
-            return false;
-        }
-    }
-    
-    // 最低限の日本語が含まれていることを確認
-    const hasValidContent = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(summary);
-    console.log('【DEBUG】日本語を含む:', hasValidContent);
-    
-    return hasValidContent;
-}
-
 function renderPredictionSummary(summaryText) {
     if (!summaryText) return false;
     
@@ -990,13 +960,6 @@ function getSummary() {
         }
         
         console.log('【DEBUG】要約を表示します:', data.summary);
-        
-        // 要約が有効な内容か確認
-        if (!isMeaningfulSummary(data.summary)) {
-            alert('もっと、いっぱい入力してください。');
-            document.getElementById('summaryButton').disabled = false;
-            return;
-        }
         
         // 要約はチャット内に追加せず、上部のサマリー領域 (`summarySection`) にのみ表示する
         session['prediction_summary'] = data.summary;
