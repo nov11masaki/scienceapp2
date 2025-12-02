@@ -1519,6 +1519,12 @@ def select_class():
 def select_number():
     class_number = request.args.get('class', '1')
     class_number = normalize_class_value(class_number) or '1'
+    # 5組（研究室）はパスワード必須
+    if class_number == '5':
+        provided = request.args.get('pass')
+        if provided != 'RIKA':
+            flash('5組（研究室）に入るにはパスワードが必要です。', 'danger')
+            return redirect(url_for('select_class'))
     return render_template('select_number.html', class_number=class_number)
 
 @app.route('/select_unit')
