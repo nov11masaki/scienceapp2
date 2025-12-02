@@ -107,7 +107,14 @@ function loadAnalysis() {
     const formattedDate = date.replace(/-/g, '');
 
     fetch(`/teacher/analysis?date=${formattedDate}&unit=${unit}`)
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                return response.text().then(text => {
+                    throw new Error(`HTTP ${response.status}: ${text.substring(0, 100)}`);
+                });
+            }
+            return response.json();
+        })
         .then(data => {
             if (data.success) {
                 displayAnalysis(data.analysis);
