@@ -2591,6 +2591,8 @@ def teacher_logs():
         default_date = available_dates_raw[0] if available_dates_raw else datetime.now().strftime('%Y%m%d')
         # フロントエンド用に辞書形式に変換
         available_dates = [
+            {'raw': 'ALL', 'formatted': '全期間'}
+        ] + [
             {'raw': d, 'formatted': f"{d[:4]}/{d[4:6]}/{d[6:8]}"}
             for d in available_dates_raw
         ]
@@ -2611,7 +2613,22 @@ def teacher_logs():
             class_filter_int = None
     student = request.args.get('student', '')
     
-    logs = load_learning_logs(date)
+    # 指定日付のログを読み込み。"ALL" 指定時は全日付を集約
+    if date == 'ALL':
+        logs = []
+        try:
+            dates = get_available_log_dates()
+            for d in dates:
+                try:
+                    day_logs = load_learning_logs(d)
+                    logs.extend(day_logs)
+                    print(f"[LOGS] Loaded {len(day_logs)} logs from {d} (ALL)")
+                except Exception as e:
+                    print(f"[LOGS] Error loading logs for {d}: {e}")
+        except Exception as e:
+            print(f"[LOGS] Error listing dates for ALL: {e}")
+    else:
+        logs = load_learning_logs(date)
     
     # フィルタリング
     if unit:
