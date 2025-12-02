@@ -871,8 +871,13 @@ function getChatMessages() {
 
 // 要約が実質的な意味を持つかチェック
 function isMeaningfulSummary(summary) {
-    // 最小文字数チェック（緩和: 10文字以上）
-    if (!summary || summary.trim().length < 10) return false;
+    console.log('【DEBUG】isMeaningfulSummary チェック:', summary);
+    
+    // 最小文字数チェック（さらに緩和: 5文字以上）
+    if (!summary || summary.trim().length < 5) {
+        console.log('【DEBUG】文字数が不足:', summary.trim().length);
+        return false;
+    }
     
     // 無意味な連続文字（記号や同じ文字の繰り返し）をチェック
     const meaninglessPatterns = /([ヴァslmv]{2,}|[ぁぃぅぇぉ]{3,}|~~~|~~~|\.\.\.|【【|】】)/g;
@@ -882,12 +887,14 @@ function isMeaningfulSummary(summary) {
     if (meaninglessMatches > 0) {
         const totalWords = summary.split(/[\s、。]/g).length;
         if (meaninglessMatches / totalWords > 0.3) {
+            console.log('【DEBUG】無意味な文字列が多すぎる');
             return false;
         }
     }
     
-    // 実際の実験キーワードや児童の思考を含んでいるか（より広い範囲で許可）
-    const hasValidContent = /(?:児童|考え|思う|予想|気づ|わかっ|試す|観察|温度|あたたまり|変わ|大きく|小さく|膜|空気|実験|同じ|ちがい)/i.test(summary);
+    // 最低限の日本語が含まれていることを確認
+    const hasValidContent = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(summary);
+    console.log('【DEBUG】日本語を含む:', hasValidContent);
     
     return hasValidContent;
 }
