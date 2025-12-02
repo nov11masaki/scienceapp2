@@ -138,27 +138,16 @@ function updateButtons() {
     document.querySelectorAll('[id^="reflection-btn-"]').forEach((btn) => {
         const unit = btn.getAttribute('data-unit');
         const progress = unitProgress[unit];
-        const predictionSummaryCreated = progress && progress.prediction_summary_created;
         
         if (isClass5) {
-            // 5組は予想完了で考察可能
-            if (!predictionSummaryCreated) {
-                btn.disabled = true;
-                btn.title = '予想を完了してから考察に進んでください';
-            } else {
-                btn.disabled = false;
-                btn.title = '';
-            }
+            // 5組は考察可能（予想完了不要）
+            btn.disabled = false;
+            btn.title = '';
         } else {
             // 5組以外は「空気の温度と体積」のみ
             if (unit === '空気の温度と体積') {
-                if (!predictionSummaryCreated) {
-                    btn.disabled = true;
-                    btn.title = '予想を完了してから考察に進んでください';
-                } else {
-                    btn.disabled = false;
-                    btn.title = '';
-                }
+                btn.disabled = false;
+                btn.title = '';
             } else {
                 btn.disabled = true;
                 btn.title = '現在このユニットは利用できません';
@@ -203,14 +192,6 @@ function goToReflection(unit) {
     }
     
     const progress = unitProgress[unit];
-    const predictionSummaryCreated = progress && progress.prediction_summary_created;
-    
-    // 予想が完了していないかチェック
-    if (!predictionSummaryCreated) {
-        alert('考察に進む前に、予想を完了してください。');
-        return;
-    }
-    
     const reflectionNeedsResumption = progress && progress.reflection_needs_resumption;
     const reflectionSummaryCreated = progress && progress.reflection_summary_created;
     
@@ -224,7 +205,7 @@ function goToReflection(unit) {
         return;
     }
     
-    // 常に新規セッション開始（会話復帰機能はなし）
+    // 考察ページへ
     window.location.href = `/reflection?class=${classNumber}&number=${studentNumber}&unit=${encodeURIComponent(unit)}`;
 }
 
