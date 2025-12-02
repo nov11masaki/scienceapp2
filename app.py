@@ -319,7 +319,7 @@ def get_device_fingerprint():
     return fingerprint
 
 def check_session_conflict(student_id):
-    """同一学生IDの他セッションを検出"""
+    """同一児童IDの他セッションを検出"""
     current_device = get_device_fingerprint()
     
     if student_id in active_sessions:
@@ -2559,7 +2559,7 @@ def teacher_logs():
         logs = [log for log in logs 
                 if log.get('seat_num') == int(student)]
     
-    # 学生ごとにグループ化（クラスと出席番号の組み合わせで識別）
+    # 児童ごとにグループ化（クラスと出席番号の組み合わせで識別）
     students_data = {}
     for log in logs:
         class_num = log.get('class_num')
@@ -2819,7 +2819,7 @@ def teacher_export_json():
 @app.route('/teacher/student_detail')
 @require_teacher_auth
 def student_detail():
-    """学生の詳細ログページ"""
+    """児童の詳細ログページ"""
     # クラスと出席番号をクエリパラメータから取得
     class_param = request.args.get('class')
     class_num = normalize_class_value_int(class_param)
@@ -2846,7 +2846,7 @@ def student_detail():
     # 学習ログを読み込み
     logs = load_learning_logs(selected_date)
     
-    # 該当する学生のログを抽出（クラスと出席番号で絞り込み）
+    # 該当する児童のログを抽出（クラスと出席番号で絞り込み）
     student_logs = []
     if class_num and seat_num:
         student_logs = [log for log in logs if 
@@ -2864,13 +2864,13 @@ def student_detail():
         flash('クラスと出席番号が指定されていません。', 'error')
         return redirect(url_for('teacher_logs'))
     
-    # 学生表示名
+    # 児童表示名
     if class_num and seat_num:
         student_display = f"{class_num}組{seat_num}番"
     elif student_id:
         student_display = f"ID: {student_id}"
     else:
-        student_display = "対象の学生"
+        student_display = "対象の児童"
     
     if not student_logs:
         flash(f'{student_display}のログがありません。日付や単元を変更してお試しください。', 'warning')
@@ -2896,10 +2896,10 @@ def student_detail():
 @app.route('/api/teacher/students-by-class')
 @require_teacher_auth
 def api_students_by_class():
-    """クラスごとの学生情報をJSON形式で返す"""
+    """クラスごとの児童情報をJSON形式で返す"""
     students_by_class = {}
     
-    # learning_progress.jsonから学生情報を取得
+    # learning_progress.jsonから児童情報を取得
     if os.path.exists(LEARNING_PROGRESS_FILE):
         try:
             with open(LEARNING_PROGRESS_FILE, 'r', encoding='utf-8') as f:
