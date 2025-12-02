@@ -2164,12 +2164,8 @@ def reflection():
     prediction_stage = stage_progress.get('prediction', {})
     prediction_summary_created = prediction_stage.get('summary_created', False)
     
-    # 予想が完了していない場合はアクセス拒否（3組を除く）
-    # 3組のみ予想なしで考察へ進める（テスト/研究用）
-    if not prediction_summary_created and class_number != '3':
-        print(f"[REFLECTION] 予想未完了のため考察へのアクセスを拒否（クラス: {class_number}）")
-        flash('考察に進む前に、予想を完了してください。', 'warning')
-        return redirect(url_for('select_unit', class_number=class_number, student_number=student_number))
+    # ℹ️ 予想完了なしでも考察へアクセス可能（新仕様）
+    print(f"[REFLECTION] 考察へアクセス: unit={unit}, student={class_number}_{student_number}, prediction_completed={prediction_summary_created}")
     
     # 異なる単元に移動した場合、セッションをクリア（単元混在防止）
     current_unit = session.get('unit')
