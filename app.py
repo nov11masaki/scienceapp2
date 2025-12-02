@@ -1933,6 +1933,37 @@ def summary():
             pass
         return jsonify({'error': f'まとめ生成中にエラーが発生しました。'}), 500
 
+@app.route('/job_status/<job_id>', methods=['GET'])
+def job_status(job_id):
+    """RQジョブのステータスを取得"""
+    try:
+        if rq_queue is None:
+            return jsonify({'error': 'Job queue not available'}), 503
+        
+        from rq.job import Job
+        job = Job.fetch(job_id, connection=rq_queue.connection)
+        
+        if job.is_finished:
+            return jsonify({
+                'status': 'finished',
+                'result': job.result
+            })
+        elif job.is_failed:
+            return jsonify({
+                'status': 'failed',
+                'error': str(job.exc_info) if job.exc_info else 'Unknown error'
+            })
+        elif job.is_started:
+            return jsonify({'status': 'started'})
+        elif job.is_queued:
+            return jsonify({'status': 'queued'})
+        else:
+            return jsonify({'status': 'unknown'})
+    
+    except Exception as e:
+        print(f"[JOB_STATUS] Error fetching job {job_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/sync-session', methods=['POST'])
 def sync_session():
     """クライアント側のlocalStorageデータをサーバーに同期（GCS/ローカル保存）"""
