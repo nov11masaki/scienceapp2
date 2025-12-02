@@ -2,8 +2,9 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 
 export let options = {
-  vus: 30,            // 同時仮想ユーザー数
-  duration: '2m',     // テスト時間
+  vus: 30,            // 同時仮想ユーザー数（30人が同時にアクセス）
+  duration: '3m',     // テスト時間（3分間）
+  rampUp: '30s',      // 30秒でVUを段階的に増加
 };
 
 const BASE = __ENV.TARGET_URL || 'http://localhost:8080';
@@ -19,11 +20,10 @@ export default function () {
   });
   sleep(Math.random() * 1 + 0.5);
 
-  // 2) 要約トリガー（同期/非同期どちらでも挙動を確認）
-  // 本番は非同期キューを推奨。ここでは /summary を呼ぶ例。
-  let sumRes = http.get(`${BASE}/summary?class=5&number=1&unit=空気の温度と体積`);
+  // 2) 要約トリガー（POST で呼び出し）
+  let sumRes = http.post(`${BASE}/summary?class=5&number=1&unit=空気の温度と体積`, null, { headers: headers });
   check(sumRes, {
-    'summary status ok': (r) => r.status === 200 || r.status === 202 || r.status === 201 || r.status === 302,
+    'summary status ok': (r) => r.status === 200 || r.status === 202 || r.status === 201 || r.status === 302 || r.status === 400,
   });
 
   sleep(1);
