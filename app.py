@@ -1160,41 +1160,36 @@ def load_learning_logs(date=None):
     
     # 本番環境: GCS優先
     if USE_GCS and bucket:
+        # GCS から読み込み
         try:
             log_filename = f"logs/learning_log_{date}.json"
             print(f"[LOG_LOAD] GCS START - loading logs from: {log_filename}")
             
             blob = bucket.blob(log_filename)
-            if not blob.exists():
-                print(f"[LOG_LOAD] GCS file does not exist: {log_filename}")
-                return []
-            
-            content = blob.download_as_string()
-            logs = json.loads(content.decode('utf-8'))
-            log_count = len(logs)
-            print(f"[LOG_LOAD] GCS SUCCESS - loaded {log_count} logs from {date}")
-            return logs
+            try:
+                content = blob.download_as_string()
+                logs = json.loads(content.decode('utf-8'))
+                log_count = len(logs)
+                print(f"[LOG_LOAD] GCS SUCCESS - loaded {log_count} logs from {date}")
+                return logs
+            except Exception as e:
+                print(f"[LOG_LOAD] GCS file not found: {log_filename}")
         except Exception as e:
             print(f"[LOG_LOAD] GCS ERROR - {type(e).__name__}: {str(e)}")
             import traceback
             traceback.print_exc()
-            # GCSエラーの場合はローカルにフォールバック
     
     # 開発環境またはGCS失敗時: ローカルファイルから読み込み
     log_filename = f"learning_log_{date}.json"
     log_file = f"logs/{log_filename}"
     
     if not os.path.exists(log_file):
-        print(f"[LOG_LOAD] LOCAL file not found: {log_file}")
         return []
     
     try:
         with open(log_file, 'r', encoding='utf-8') as f:
-            logs = json.load(f)
-            print(f"[LOG_LOAD] LOCAL SUCCESS - loaded {len(logs)} logs from {date}")
-            return logs
-    except (json.JSONDecodeError, FileNotFoundError) as e:
-        print(f"[LOG_LOAD] LOCAL ERROR: {str(e)}")
+            return json.load(f)
+    except (json.JSONDecodeError, FileNotFoundError):
         return []
 
 def get_available_log_dates():
@@ -1202,43 +1197,36 @@ def get_available_log_dates():
     import glob
     import os
     
-    dates = []
+    dates = set()
     
-    # 本番環境: GCSから取得
+    # GCSから取得（本番環境）
     if USE_GCS and bucket:
         try:
-            print(f"[DATES] GCS START - listing log files from bucket")
+            print(f"[DATES] Checking GCS bucket for log files...")
             blobs = bucket.list_blobs(prefix='logs/learning_log_')
-            
             for blob in blobs:
                 filename = os.path.basename(blob.name)
                 if filename.startswith('learning_log_') and filename.endswith('.json'):
-                    date_str = filename[13:-5]  # 'learning_log_' の後から '.json' の前まで
+                    date_str = filename[13:-5]  # learning_log_YYYYMMDD.json
                     if len(date_str) == 8 and date_str.isdigit():
-                        dates.append(date_str)
-            
-            print(f"[DATES] GCS SUCCESS - found {len(dates)} log dates")
+                        dates.add(date_str)
+            print(f"[DATES] Found {len(dates)} dates in GCS")
         except Exception as e:
-            print(f"[DATES] GCS ERROR - {type(e).__name__}: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            print(f"[DATES] GCS ERROR: {str(e)}")
     
-    # 開発環境またはGCS失敗時: ローカルファイル
-    if not dates:
-        log_files = glob.glob("logs/learning_log_*.json")
-        for file in log_files:
-            filename = os.path.basename(file)
-            if filename.startswith('learning_log_') and filename.endswith('.json'):
-                date_str = filename[13:-5]
-                if len(date_str) == 8 and date_str.isdigit():
-                    dates.append(date_str)
-        print(f"[DATES] LOCAL - found {len(dates)} log dates")
+    # ローカルファイルも確認（開発環境用）
+    log_files = glob.glob("logs/learning_log_*.json")
+    for file in log_files:
+        filename = os.path.basename(file)
+        if filename.startswith('learning_log_') and filename.endswith('.json'):
+            date_str = filename[13:-5]
+            if len(date_str) == 8 and date_str.isdigit():
+                dates.add(date_str)
     
-    dates = list(set(dates))  # 重複削除
-    dates.sort(reverse=True)  # 新しい順
-    print(f"[DATES] FINAL - returning {len(dates)} dates: {dates[:5] if dates else []}")
+    dates_list = sorted(list(dates), reverse=True)  # 新しい順
+    print(f"[DATES] Total found {len(dates_list)} log dates: {dates_list[:5]}")
     
-    return dates
+    return dates_list
 
 # エラーログ管理機能
 def save_error_log(student_number, class_number, error_message, error_type, stage, unit, additional_info=None):
