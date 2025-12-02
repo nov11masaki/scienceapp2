@@ -900,6 +900,40 @@ function renderPredictionSummary(summaryText) {
     return true;
 }
 
+function pollSummaryJob(jobId) {
+    console.log('【DEBUG】ジョブポーリング開始:', jobId);
+    
+    const pollInterval = setInterval(() => {
+        fetch(`/job_status/${jobId}`)
+            .then(response => response.json())
+            .then(data => {
+                console.log('【DEBUG】ジョブステータス:', data.status);
+                
+                if (data.status === 'finished' && data.result) {
+                    clearInterval(pollInterval);
+                    console.log('【DEBUG】要約を表示します:', data.result);
+                    
+                    // 要約を表示
+                    session['prediction_summary'] = data.result;
+                    predictionStatus.prediction_summary_created = true;
+                    predictionStatus.predictionSummary = data.result;
+                    renderPredictionSummary(data.result);
+                } else if (data.status === 'failed') {
+                    clearInterval(pollInterval);
+                    console.error('【DEBUG】ジョブ失敗:', data.error);
+                    alert('予想をまとめることができませんでした。\nもう一度やってみてください。');
+                    document.getElementById('summaryButton').disabled = false;
+                }
+            })
+            .catch(error => {
+                clearInterval(pollInterval);
+                console.error('【DEBUG】ポーリングエラー:', error);
+                alert('予想をまとめることができませんでした。\nもう一度やってみてください。');
+                document.getElementById('summaryButton').disabled = false;
+            });
+    }, 2000); // 2秒ごとにポーリング
+}
+
 function getSummary() {
     console.log('【DEBUG】getSummary 呼び出し');
     
@@ -956,6 +990,13 @@ function getSummary() {
         if (data.error) {
             alert('まとめられません：' + data.error);
             document.getElementById('summaryButton').disabled = false;
+            return;
+        }
+        
+        // ジョブIDが返された場合はポーリング
+        if (data.job_id) {
+            console.log('【DEBUG】ジョブID:', data.job_id, 'ステータス:', data.status);
+            pollSummaryJob(data.job_id);
             return;
         }
         
