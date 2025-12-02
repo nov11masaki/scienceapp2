@@ -2448,7 +2448,21 @@ def final_summary():
         
         return jsonify({'summary': final_summary_text})
     except Exception as e:
-        return jsonify({'error': f'最終まとめ生成中にエラーが発生しました。'}), 500
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"【ERROR】/final_summary エラー: {str(e)}")
+        print(error_detail)
+        save_learning_log(
+            student_number=session.get('student_number'),
+            unit=session.get('unit'),
+            log_type='final_summary_error',
+            data={
+                'error': str(e),
+                'traceback': error_detail
+            },
+            class_number=session.get('class_number')
+        )
+        return jsonify({'error': f'最終まとめ生成中にエラーが発生しました: {str(e)}'}), 500
 
 @app.route('/get_prediction_summary', methods=['GET'])
 def get_prediction_summary():
