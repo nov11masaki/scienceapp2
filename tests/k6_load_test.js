@@ -7,7 +7,7 @@ export let options = {
   rampUp: '30s',      // 30秒でVUを段階的に増加
 };
 
-const BASE = __ENV.TARGET_URL || 'http://localhost:8080';
+const BASE = __ENV.TARGET_URL || 'https://sciencebuddy.ngrok.app';
 
 export default function () {
   const headers = { 'Content-Type': 'application/json' };

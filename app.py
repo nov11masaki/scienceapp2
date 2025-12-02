@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash, Response
 import openai
 import os
+import sys
 from dotenv import load_dotenv
 import json
 from datetime import datetime
@@ -2340,7 +2341,10 @@ def reflect_chat():
         })
         
     except Exception as e:
-        return jsonify({'error': f'AI接続エラーが発生しました。しばらく待ってから再度お試しください。'}), 500
+        import traceback
+        error_msg = f"[REFLECT_CHAT_ERROR] {str(e)}\n{traceback.format_exc()}"
+        print(error_msg, file=sys.stderr)
+        return jsonify({'error': f'AI接続エラーが発生しました。しばらく待ってから再度お試しください。\nDebug: {str(e)}'}), 500
 
 @app.route('/final_summary', methods=['POST'])
 def final_summary():
@@ -2634,6 +2638,7 @@ def teacher_export():
     available_dates = get_available_log_dates()
     
     print(f"[EXPORT] START - exporting logs up to date: {download_date_str}")
+    print(f"[EXPORT] Available dates: {available_dates}")
     
     for date_str in available_dates:
         # date_str は文字列 (YYYYMMDD format)
@@ -2646,6 +2651,8 @@ def teacher_export():
                 print(f"[EXPORT] Loaded {len(logs)} logs from {current_date_raw}")
             except Exception as e:
                 print(f"[EXPORT] ERROR loading logs from {current_date_raw}: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 continue
 
     # フロントのフィルタ（現在の表示）に合わせて絞り込み可能にする
