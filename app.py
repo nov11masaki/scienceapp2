@@ -2164,9 +2164,10 @@ def reflection():
     prediction_stage = stage_progress.get('prediction', {})
     prediction_summary_created = prediction_stage.get('summary_created', False)
     
-    # 予想が完了していない場合はアクセス拒否
-    if not prediction_summary_created:
-        print(f"[REFLECTION] 予想未完了のため考察へのアクセスを拒否")
+    # 予想が完了していない場合はアクセス拒否（3組を除く）
+    # 3組のみ予想なしで考察へ進める（テスト/研究用）
+    if not prediction_summary_created and class_number != '3':
+        print(f"[REFLECTION] 予想未完了のため考察へのアクセスを拒否（クラス: {class_number}）")
         flash('考察に進む前に、予想を完了してください。', 'warning')
         return redirect(url_for('select_unit', class_number=class_number, student_number=student_number))
     
