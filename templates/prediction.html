@@ -871,7 +871,8 @@ function getChatMessages() {
 
 // 要約が実質的な意味を持つかチェック
 function isMeaningfulSummary(summary) {
-    if (!summary || summary.trim().length < 15) return false;
+    // 最小文字数チェック（緩和: 10文字以上）
+    if (!summary || summary.trim().length < 10) return false;
     
     // 無意味な連続文字（記号や同じ文字の繰り返し）をチェック
     const meaninglessPatterns = /([ヴァslmv]{2,}|[ぁぃぅぇぉ]{3,}|~~~|~~~|\.\.\.|【【|】】)/g;
@@ -885,8 +886,8 @@ function isMeaningfulSummary(summary) {
         }
     }
     
-    // 実際の実験キーワードや児童の思考を含んでいるか
-    const hasValidContent = /(?:児童|考え|思う|予想|気づ|わかっ|試す|観察|温度|あたたまり|変わ)/i.test(summary);
+    // 実際の実験キーワードや児童の思考を含んでいるか（より広い範囲で許可）
+    const hasValidContent = /(?:児童|考え|思う|予想|気づ|わかっ|試す|観察|温度|あたたまり|変わ|大きく|小さく|膜|空気|実験|同じ|ちがい)/i.test(summary);
     
     return hasValidContent;
 }

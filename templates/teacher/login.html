@@ -19,7 +19,7 @@
                             {% for category, message in messages %}
                                 <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
                                     {{ message }}
-                                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                                    <button type="button" class="btn-close" data-bs-dismiss="alert" title="アラートを閉じる"></button>
                                 </div>
                             {% endfor %}
                         {% endif %}
@@ -94,8 +94,8 @@ document.addEventListener('DOMContentLoaded', function() {
 /* ガラス風入力フィールド */
 .glass-input {
     background: rgba(255, 255, 255, 0.1) !important;
-    backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
     border: 2px solid rgba(255, 255, 255, 0.2) !important;
     color: #2d3748 !important;
     transition: all 0.3s ease;
@@ -131,8 +131,8 @@ document.addEventListener('DOMContentLoaded', function() {
 /* ガラス風ボタン */
 .glass-button {
     background: rgba(66, 153, 225, 0.2) !important;
-    backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
     border: 2px solid rgba(66, 153, 225, 0.4) !important;
     color: white !important;
     font-weight: 600;
@@ -173,8 +173,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
 .glass-button-outline {
     background: rgba(255, 255, 255, 0.1) !important;
-    backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
     border: 2px solid rgba(108, 117, 125, 0.3) !important;
     color: #6c757d !important;
     font-weight: 600;
