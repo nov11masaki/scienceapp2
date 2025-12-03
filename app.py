@@ -3117,33 +3117,79 @@ def teacher_analysis():
             logs = [log for log in logs if log.get('unit') == unit]
             print(f"[ANALYSIS] Filtered to {len(logs)} logs for unit={unit}")
         
-        # 分析を実行（エラーが起きても部分的な結果を返す）
-        try:
-            analysis_result = analyze_predictions_and_reflections(logs)
-            print(f"[ANALYSIS] Analysis completed successfully")
-        except Exception as analysis_err:
-            print(f"[ANALYSIS] Analysis failed: {analysis_err}")
-            import traceback
-            traceback.print_exc()
-            # 最小限の結果を返す
-            analysis_result = {
-                'total_logs': len(logs),
-                'prediction_chats': len([l for l in logs if l.get('log_type') == 'prediction_chat']),
-                'reflection_chats': len([l for l in logs if l.get('log_type') == 'reflection_chat']),
-                'predictions_by_unit': {},
-                'reflections_by_unit': {},
-                'text_analysis': {},
-                'embeddings_analysis': {},
-                'insights': {},
-                'prompt_recommendations': {},
-                'error': str(analysis_err)
-            }
+        # クラス・座席番号別に会話を組み立て
+        student_conversations = {}
+        for log in logs:
+            class_num = log.get('class_num')
+            seat_num = log.get('seat_num')
+            log_unit = log.get('unit')
+            log_type = log.get('log_type')
+            data = log.get('data', {})
+            
+            key = f"{class_num}_{seat_num}_{log_unit}"
+            if key not in student_conversations:
+                student_conversations[key] = {
+                    'class_num': class_num,
+                    'seat_num': seat_num,
+                    'unit': log_unit,
+                    'conversation': [],
+                    'prediction_text': '',
+                    'reflection_text': ''
+                }
+            
+            # 会話ログを組み立て
+            if log_type in ('prediction_chat', 'reflection_chat'):
+                if data.get('user_message'):
+                    student_conversations[key]['conversation'].append({
+                        'role': 'user',
+                        'content': data.get('user_message', '')
+                    })
+                if data.get('ai_response'):
+                    student_conversations[key]['conversation'].append({
+                        'role': 'assistant',
+                        'content': data.get('ai_response', '')
+                    })
+            elif log_type == 'prediction_summary':
+                student_conversations[key]['prediction_text'] = data.get('summary', '')
+            elif log_type == 'final_summary':
+                student_conversations[key]['reflection_text'] = data.get('final_summary', '')
+        
+        # 各学生の分析を実行
+        analysis_results = {}
+        for key, student_data in student_conversations.items():
+            try:
+                analysis = analyze_conversation_only(
+                    student_data['conversation'],
+                    student_data['prediction_text'],
+                    student_data['reflection_text'],
+                    student_data['unit']
+                )
+                analysis_results[key] = {
+                    'class_num': student_data['class_num'],
+                    'seat_num': student_data['seat_num'],
+                    'unit': student_data['unit'],
+                    'analysis': analysis,
+                    'conversation_count': len(student_data['conversation']),
+                    'has_prediction': bool(student_data['prediction_text']),
+                    'has_reflection': bool(student_data['reflection_text'])
+                }
+            except Exception as analysis_err:
+                print(f"[ANALYSIS] Error analyzing {key}: {analysis_err}")
+                import traceback
+                traceback.print_exc()
+        
+        # 単元ごとに集計
+        prediction_chats = len([l for l in logs if l.get('log_type') == 'prediction_chat'])
+        reflection_chats = len([l for l in logs if l.get('log_type') == 'reflection_chat'])
         
         return jsonify({
             'success': True,
             'date': date,
             'unit': unit,
-            'analysis': analysis_result,
+            'total_logs': len(logs),
+            'prediction_chats': prediction_chats,
+            'reflection_chats': reflection_chats,
+            'student_analyses': analysis_results,
             'log_count': len(logs)
         })
     except Exception as e:
@@ -3175,20 +3221,17 @@ def analyze_student():
         prediction_text = request.form.get('prediction', '').strip()
         reflection_text = request.form.get('reflection', '').strip()
         
-        print(f"[ANALYZE] 入力データ: class={class_num}, seat={seat_num}, unit={unit}")
-        print(f"[ANALYZE] 予想: {prediction_text[:50] if prediction_text else '(空)'}")
-        print(f"[ANALYZE] 考察: {reflection_text[:50] if reflection_text else '(空)'}")
-        
         if not all([class_num, seat_num, unit, prediction_text, reflection_text]):
             return jsonify({'success': False, 'error': '全ての項目を入力してください'}), 400
+        
+        # ノート内容を統合（予想→考察の順）
+        combined_note = f"【予想】\n{prediction_text}\n\n【考察】\n{reflection_text}"
         
         # GCS/ローカルから会話ログを取得
         dates = get_available_log_dates()
         logs = []
         for d in dates:
             logs.extend(load_learning_logs(d))
-        
-        print(f"[ANALYZE] 全ログ数: {len(logs)}")
         
         # フィルタ: class, seat, unit にマッチするログを取得
         class_num_int = normalize_class_value_int(class_num)
@@ -3201,8 +3244,6 @@ def analyze_student():
             if log.get('unit') != unit:
                 continue
             filtered.append(log)
-        
-        print(f"[ANALYZE] フィルタ後: {len(filtered)} ログ")
         
         # 会話履歴を時系列で組み立て
         conversation = []
@@ -3218,18 +3259,14 @@ def analyze_student():
                 if ar:
                     conversation.append({'role': 'assistant', 'content': ar})
         
-        print(f"[ANALYZE] 会話数: {len(conversation)}")
-        
         # 分析実行（会話ログ + 予想・考察テキスト）
         analysis = analyze_conversation_and_note(
             conversation, 
-            note_text='',
+            note_text='',  # 統合ノートは使わない
             prediction_text=prediction_text,
             reflection_text=reflection_text,
             unit=unit
         )
-        
-        print(f"[ANALYZE] 分析完了: summary={analysis.get('summary', '(なし)')[:50]}")
         
         return render_template(
             'teacher/analysis_result.html',

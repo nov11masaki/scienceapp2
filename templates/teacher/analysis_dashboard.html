@@ -129,21 +129,62 @@ function loadAnalysis() {
 }
 
 // 分析結果を表示
-function displayAnalysis(analysis) {
+function displayAnalysis(data) {
     // 統計情報を表示
-    document.getElementById('totalChats').textContent = analysis.total_logs;
-    document.getElementById('predictionCount').textContent = analysis.prediction_chats;
-    document.getElementById('reflectionCount').textContent = analysis.reflection_chats;
+    document.getElementById('totalChats').textContent = data.total_logs || 0;
+    document.getElementById('predictionCount').textContent = data.prediction_chats || 0;
+    document.getElementById('reflectionCount').textContent = data.reflection_chats || 0;
 
-    // 予想段階の分析を表示
-    displayPredictionAnalysis(analysis.predictions_by_unit, analysis.text_analysis);
+    // 学生分析結果を集計
+    const studentAnalyses = data.student_analyses || {};
+    
+    if (Object.keys(studentAnalyses).length === 0) {
+        document.getElementById('predictionAnalysis').innerHTML = '<p class="no-data">分析データがありません</p>';
+        document.getElementById('reflectionAnalysis').innerHTML = '<p class="no-data">分析データがありません</p>';
+        return;
+    }
 
-    // 考察段階の分析を表示
-    displayReflectionAnalysis(analysis.reflections_by_unit, analysis.text_analysis);
+    // 予想・考察の集計
+    const predictionsByUnit = {};
+    const reflectionsByUnit = {};
+    
+    for (const [key, studentData] of Object.entries(studentAnalyses)) {
+        const unit = studentData.unit;
+        const analysis = studentData.analysis;
+        
+        if (!predictionsByUnit[unit]) {
+            predictionsByUnit[unit] = [];
+        }
+        if (!reflectionsByUnit[unit]) {
+            reflectionsByUnit[unit] = [];
+        }
+        
+        // 予想情報を追加
+        if (analysis.prediction_and_reflection && analysis.prediction_and_reflection.prediction.has_text) {
+            predictionsByUnit[unit].push({
+                student: `${studentData.class_num}組${studentData.seat_num}番`,
+                analysis: analysis.prediction_and_reflection.prediction,
+                overall_analysis: analysis
+            });
+        }
+        
+        // 考察情報を追加
+        if (analysis.prediction_and_reflection && analysis.prediction_and_reflection.reflection.has_text) {
+            reflectionsByUnit[unit].push({
+                student: `${studentData.class_num}組${studentData.seat_num}番`,
+                analysis: analysis.prediction_and_reflection.reflection,
+                overall_analysis: analysis
+            });
+        }
+    }
+
+    // 表示
+    displayPredictionAnalysis(predictionsByUnit);
+    displayReflectionAnalysis(reflectionsByUnit);
 }
 
 // 予想段階の分析を表示
-function displayPredictionAnalysis(predictionsByUnit, textAnalysis) {
+function displayPredictionAnalysis(predictionsByUnit) {
     const container = document.getElementById('predictionAnalysis');
     container.innerHTML = '';
 
@@ -153,55 +194,41 @@ function displayPredictionAnalysis(predictionsByUnit, textAnalysis) {
     }
 
     for (const [unit, predictions] of Object.entries(predictionsByUnit)) {
-        const unitAnalysis = textAnalysis[unit]?.prediction || {};
+        const avgClarityScore = predictions.reduce((sum, p) => sum + (p.analysis.basis_clarity || 0), 0) / predictions.length;
+        const withExperience = predictions.filter(p => p.analysis.has_experience_reference).length;
+        
         const html = `
             <div class="unit-analysis">
                 <h3>${unit}</h3>
                 <div class="analysis-metrics">
                     <div class="metric">
-                        <label>対話数:</label>
+                        <label>児童数:</label>
                         <span>${predictions.length}</span>
                     </div>
                     <div class="metric">
-                        <label>平均文字数:</label>
-                        <span>${Math.round(unitAnalysis.average_length || 0)}</span>
+                        <label>平均根拠度:</label>
+                        <span>${avgClarityScore.toFixed(1)}/3</span>
                     </div>
                     <div class="metric">
-                        <label>最大文字数:</label>
-                        <span>${unitAnalysis.max_length || 0}</span>
+                        <label>経験参照:</label>
+                        <span>${withExperience}/${predictions.length}</span>
                     </div>
                 </div>
-                <div class="keywords-section">
-                    <h4>頻出キーワード:</h4>
-                    <div class="keywords-list">
-                        ${(unitAnalysis.keywords || []).map(kw =>
-                            `<span class="keyword-tag">${kw.word} <small>(${kw.count})</small></span>`
-                        ).join('')}
-                    </div>
-                </div>
-                <div class="patterns-section">
-                    <h4>表現パターン:</h4>
-                    <ul class="patterns-list">
-                        <li>予想表現: ${unitAnalysis.patterns?.prediction_expressions || 0}回</li>
-                        <li>因果表現: ${unitAnalysis.patterns?.causal_expressions || 0}回</li>
-                        <li>比較表現: ${unitAnalysis.patterns?.comparison_expressions || 0}回</li>
-                        <li>経験参照: ${unitAnalysis.patterns?.experience_references || 0}回</li>
-                        <li>不確実性表現: ${unitAnalysis.patterns?.uncertainty_expressions || 0}回</li>
-                    </ul>
-                </div>
-                <details class="sample-messages">
-                    <summary>📝 サンプルメッセージを見る</summary>
-                    <div class="messages-list">
-                        ${predictions.slice(0, 5).map(p => `
-                            <div class="message-item">
-                                <div class="message-student">${p.student}</div>
-                                <div class="message-text">
-                                    <strong>児童:</strong> ${escapeHtml(p.user_message)}
-                                </div>
+                <div class="students-section">
+                    <h4>児童別予想分析:</h4>
+                    <div class="students-list">
+                        ${predictions.map(p => `
+                            <div class="student-analysis-item">
+                                <strong>${p.student}</strong>
+                                <ul style="font-size: 0.9rem;">
+                                    <li>根拠度: ${p.analysis.basis_clarity || 0}/3</li>
+                                    <li>経験参照: ${p.analysis.has_experience_reference ? 'あり' : 'なし'}</li>
+                                    <li>テキスト長: ${p.analysis.text_length || 0}文字</li>
+                                </ul>
                             </div>
                         `).join('')}
                     </div>
-                </details>
+                </div>
             </div>
         `;
         container.innerHTML += html;
@@ -209,7 +236,7 @@ function displayPredictionAnalysis(predictionsByUnit, textAnalysis) {
 }
 
 // 考察段階の分析を表示
-function displayReflectionAnalysis(reflectionsByUnit, textAnalysis) {
+function displayReflectionAnalysis(reflectionsByUnit) {
     const container = document.getElementById('reflectionAnalysis');
     container.innerHTML = '';
 
@@ -219,55 +246,42 @@ function displayReflectionAnalysis(reflectionsByUnit, textAnalysis) {
     }
 
     for (const [unit, reflections] of Object.entries(reflectionsByUnit)) {
-        const unitAnalysis = textAnalysis[unit]?.reflection || {};
+        const avgLinkingScore = reflections.reduce((sum, r) => sum + (r.analysis.linking_count || 0), 0) / reflections.length;
+        const withExperimentLink = reflections.filter(r => r.analysis.experiment_link_count > 0).length;
+        
         const html = `
             <div class="unit-analysis">
                 <h3>${unit}</h3>
                 <div class="analysis-metrics">
                     <div class="metric">
-                        <label>対話数:</label>
+                        <label>児童数:</label>
                         <span>${reflections.length}</span>
                     </div>
                     <div class="metric">
-                        <label>平均文字数:</label>
-                        <span>${Math.round(unitAnalysis.average_length || 0)}</span>
+                        <label>平均関係付け数:</label>
+                        <span>${avgLinkingScore.toFixed(1)}</span>
                     </div>
                     <div class="metric">
-                        <label>最大文字数:</label>
-                        <span>${unitAnalysis.max_length || 0}</span>
+                        <label>実験結果連結:</label>
+                        <span>${withExperimentLink}/${reflections.length}</span>
                     </div>
                 </div>
-                <div class="keywords-section">
-                    <h4>頻出キーワード:</h4>
-                    <div class="keywords-list">
-                        ${(unitAnalysis.keywords || []).map(kw =>
-                            `<span class="keyword-tag">${kw.word} <small>(${kw.count})</small></span>`
-                        ).join('')}
-                    </div>
-                </div>
-                <div class="patterns-section">
-                    <h4>表現パターン:</h4>
-                    <ul class="patterns-list">
-                        <li>予想表現: ${unitAnalysis.patterns?.prediction_expressions || 0}回</li>
-                        <li>因果表現: ${unitAnalysis.patterns?.causal_expressions || 0}回</li>
-                        <li>比較表現: ${unitAnalysis.patterns?.comparison_expressions || 0}回</li>
-                        <li>経験参照: ${unitAnalysis.patterns?.experience_references || 0}回</li>
-                        <li>不確実性表現: ${unitAnalysis.patterns?.uncertainty_expressions || 0}回</li>
-                    </ul>
-                </div>
-                <details class="sample-messages">
-                    <summary>📝 サンプルメッセージを見る</summary>
-                    <div class="messages-list">
-                        ${reflections.slice(0, 5).map(r => `
-                            <div class="message-item">
-                                <div class="message-student">${r.student}</div>
-                                <div class="message-text">
-                                    <strong>児童:</strong> ${escapeHtml(r.user_message)}
-                                </div>
+                <div class="students-section">
+                    <h4>児童別考察分析:</h4>
+                    <div class="students-list">
+                        ${reflections.map(r => `
+                            <div class="student-analysis-item">
+                                <strong>${r.student}</strong>
+                                <ul style="font-size: 0.9rem;">
+                                    <li>関係付け数: ${r.analysis.linking_count || 0}</li>
+                                    <li>実験連結: ${r.analysis.experiment_link_count > 0 ? 'あり' : 'なし'}</li>
+                                    <li>一貫性: ${r.analysis.prediction_consistency || 'N/A'}</li>
+                                    <li>テキスト長: ${r.analysis.text_length || 0}文字</li>
+                                </ul>
                             </div>
                         `).join('')}
                     </div>
-                </details>
+                </div>
             </div>
         `;
         container.innerHTML += html;
