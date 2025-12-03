@@ -19,7 +19,7 @@ import tempfile
 from pathlib import Path
 from functools import lru_cache, wraps
 from werkzeug.utils import secure_filename
-from tools.analysis import analyze_conversation_and_note
+from tools.analysis import analyze_conversation_and_note, analyze_conversation_only
 
 # Optional analysis libraries (may not be available in all environments)
 try:
