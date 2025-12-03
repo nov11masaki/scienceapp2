@@ -1,0 +1,300 @@
+{% extends "base.html" %}
+
+{% block title %}学習分析結果{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-12">
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0">
+                        <i class="fas fa-chart-bar"></i> 学習分析結果
+                    </h4>
+                    <small class="text-light">{{ class_num }}組{{ seat_num }}番 / {{ unit }}</small>
+                </div>
+                <div class="card-body">
+                    <!-- サマリー -->
+                    <div class="alert alert-info">
+                        <h6>📊 総合評価</h6>
+                        <p class="mb-0">{{ analysis.summary }}</p>
+                    </div>
+
+                    <!-- 予想・考察分析 -->
+                    {% if analysis.prediction_and_reflection %}
+                    <div class="card mb-4">
+                        <div class="card-header bg-light border-bottom">
+                            <h5 class="mb-0">
+                                <i class="fas fa-lightbulb"></i> 予想・考察分析
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <!-- スコア表示 -->
+                            <div class="row mb-4">
+                                <div class="col-md-6">
+                                    <h6>🎯 総合スコア</h6>
+                                    <div class="progress" style="height: 25px;">
+                                        {% set score_percent = (analysis.prediction_and_reflection.overall_score / analysis.prediction_and_reflection.max_score * 100) | int %}
+                                        <div class="progress-bar {% if score_percent >= 70 %}bg-success{% elif score_percent >= 50 %}bg-warning{% else %}bg-danger{% endif %}" 
+                                             role="progressbar" 
+                                             style="width: {{ score_percent }}%;" 
+                                             aria-valuenow="{{ score_percent }}" 
+                                             aria-valuemin="0" 
+                                             aria-valuemax="100">
+                                            {{ analysis.prediction_and_reflection.overall_score }}/{{ analysis.prediction_and_reflection.max_score }}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 予想の分析 -->
+                            <div class="row mb-4">
+                                <div class="col-md-6">
+                                    <div class="card bg-light">
+                                        <div class="card-header">
+                                            <h6 class="mb-0">📌 予想の分析</h6>
+                                        </div>
+                                        <div class="card-body">
+                                            {% if analysis.prediction_and_reflection.prediction.has_text %}
+                                                <p class="small text-muted">入力されたテキスト:</p>
+                                                <p class="card-text" style="font-size: 0.95rem; line-height: 1.6;">
+                                                    {{ analysis.prediction_and_reflection.prediction.details.excerpt }}{% if analysis.prediction_and_reflection.prediction.text_length > 100 %}...{% endif %}
+                                                </p>
+                                                <hr>
+                                                <ul class="list-unstyled">
+                                                    <li><strong>根拠の明確性:</strong> 
+                                                        <span class="badge {% if analysis.prediction_and_reflection.prediction.basis_clarity >= 2 %}bg-success{% elif analysis.prediction_and_reflection.prediction.basis_clarity == 1 %}bg-warning{% else %}bg-secondary{% endif %}">
+                                                            {{ analysis.prediction_and_reflection.prediction.basis_clarity }}/3
+                                                        </span>
+                                                    </li>
+                                                    <li><strong>因果マーカー数:</strong> {{ analysis.prediction_and_reflection.prediction.basis_count }}</li>
+                                                    <li><strong>経験参照:</strong> 
+                                                        {% if analysis.prediction_and_reflection.prediction.has_experience_reference %}
+                                                            <span class="badge bg-success">あり</span>
+                                                        {% else %}
+                                                            <span class="badge bg-secondary">なし</span>
+                                                        {% endif %}
+                                                    </li>
+                                                </ul>
+                                            {% else %}
+                                                <p class="text-muted small">予想テキストが入力されていません</p>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 考察の分析 -->
+                                <div class="col-md-6">
+                                    <div class="card bg-light">
+                                        <div class="card-header">
+                                            <h6 class="mb-0">💭 考察の分析</h6>
+                                        </div>
+                                        <div class="card-body">
+                                            {% if analysis.prediction_and_reflection.reflection.has_text %}
+                                                <p class="small text-muted">入力されたテキスト:</p>
+                                                <p class="card-text" style="font-size: 0.95rem; line-height: 1.6;">
+                                                    {{ analysis.prediction_and_reflection.reflection.details.excerpt }}{% if analysis.prediction_and_reflection.reflection.text_length > 100 %}...{% endif %}
+                                                </p>
+                                                <hr>
+                                                <ul class="list-unstyled">
+                                                    <li><strong>関係付け数:</strong> {{ analysis.prediction_and_reflection.reflection.linking_count }}</li>
+                                                    <li><strong>実験結果との結びつき:</strong>
+                                                        {% if analysis.prediction_and_reflection.reflection.experiment_link_count > 0 %}
+                                                            <span class="badge bg-success">{{ analysis.prediction_and_reflection.reflection.experiment_link_count }}個</span>
+                                                        {% else %}
+                                                            <span class="badge bg-secondary">なし</span>
+                                                        {% endif %}
+                                                    </li>
+                                                    <li><strong>予想との一貫性:</strong>
+                                                        {% if analysis.prediction_and_reflection.reflection.prediction_consistency == 'consistent' %}
+                                                            <span class="badge bg-success">一貫している</span>
+                                                        {% elif analysis.prediction_and_reflection.reflection.prediction_consistency == 'partly_consistent' %}
+                                                            <span class="badge bg-warning">部分的に一貫</span>
+                                                        {% elif analysis.prediction_and_reflection.reflection.prediction_consistency == 'different' %}
+                                                            <span class="badge bg-warning">異なる</span>
+                                                        {% else %}
+                                                            <span class="badge bg-secondary">未確認</span>
+                                                        {% endif %}
+                                                    </li>
+                                                </ul>
+                                            {% else %}
+                                                <p class="text-muted small">考察テキストが入力されていません</p>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 解釈 -->
+                            <div class="alert alert-light border">
+                                <h6 class="mb-2">💡 分析結果の解釈</h6>
+                                <p class="mb-0">{{ analysis.prediction_and_reflection.interpretation }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- 会話ベース分析結果 -->
+                    <div class="card mb-4">
+                        <div class="card-header bg-light border-bottom">
+                            <h5 class="mb-0">
+                                <i class="fas fa-comments"></i> 会話分析（7観点）
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <!-- 思考の深化 -->
+                            <div class="mb-4 pb-3 border-bottom">
+                                <h6>
+                                    <i class="fas fa-brain"></i> ① 思考の深化
+                                    <span class="badge bg-info float-end">
+                                        {{ analysis.depth_of_thinking.self_corrections.count }} 修正 / 
+                                        {{ analysis.depth_of_thinking.hesitations.count }} ためらい
+                                    </span>
+                                </h6>
+                                <p class="small text-muted">自己修正や代替案の検討を通じて、思考を深める過程</p>
+                                {% if analysis.depth_of_thinking.self_corrections.count > 0 %}
+                                    <div class="alert alert-success alert-sm py-2">
+                                        <small>✓ {{ analysis.depth_of_thinking.self_corrections.count }}回の自己修正を確認</small>
+                                    </div>
+                                {% endif %}
+                            </div>
+
+                            <!-- 科学語彙 -->
+                            <div class="mb-4 pb-3 border-bottom">
+                                <h6>
+                                    <i class="fas fa-book"></i> ② 科学語彙の獲得
+                                    <span class="badge bg-info float-end">
+                                        {{ analysis.scientific_vocabulary.vocab_count }} 語彙 / 
+                                        {{ (analysis.scientific_vocabulary.infection_rate * 100) | int }}% 感染率
+                                    </span>
+                                </h6>
+                                <p class="small text-muted">単元に関連する科学用語の習得程度</p>
+                                {% if analysis.scientific_vocabulary.infection_rate >= 0.3 %}
+                                    <div class="alert alert-success alert-sm py-2">
+                                        <small>✓ 科学語彙の感染率が良好（{{ (analysis.scientific_vocabulary.infection_rate * 100) | int }}%）</small>
+                                    </div>
+                                {% endif %}
+                            </div>
+
+                            <!-- エンゲージメント -->
+                            <div class="mb-4 pb-3 border-bottom">
+                                <h6>
+                                    <i class="fas fa-handshake"></i> ③ エンゲージメント
+                                    <span class="badge bg-info float-end">
+                                        {{ analysis.engagement.turn_count }} 往復 / 
+                                        {{ analysis.engagement.avg_user_length | round(1) }} 字/回
+                                    </span>
+                                </h6>
+                                <p class="small text-muted">AI との対話を通じた参加度と発話の充実度</p>
+                            </div>
+
+                            <!-- 論理構造 -->
+                            <div class="mb-4 pb-3 border-bottom">
+                                <h6>
+                                    <i class="fas fa-sitemap"></i> ④ 論理構造の定着
+                                    <span class="badge bg-info float-end">
+                                        {{ analysis.structure_crystallization.qa_exchanges }} QA / 
+                                        {{ analysis.structure_crystallization.multi_sentence_responses }}複文
+                                    </span>
+                                </h6>
+                                <p class="small text-muted">質問に対する問答構造や多段階的な説明の構築</p>
+                            </div>
+
+                            <!-- 根拠統合 -->
+                            <div class="mb-4 pb-3 border-bottom">
+                                <h6>
+                                    <i class="fas fa-link"></i> ⑤ 根拠の統合
+                                    <span class="badge bg-info float-end">
+                                        {{ analysis.evidence_integration.experience_mentions }} 経験 / 
+                                        {{ analysis.evidence_integration.evidence_keywords_count }} 根拠
+                                    </span>
+                                </h6>
+                                <p class="small text-muted">過去の経験や実験結果を根拠として活用する力</p>
+                            </div>
+
+                            <!-- メタ認知 -->
+                            <div class="mb-4 pb-3 border-bottom">
+                                <h6>
+                                    <i class="fas fa-eye"></i> ⑥ メタ認知
+                                    <span class="badge bg-info float-end">
+                                        {% if analysis.metacognition.has_metacognition %}
+                                            あり（{{ analysis.metacognition.mention_count }}回）
+                                        {% else %}
+                                            なし
+                                        {% endif %}
+                                    </span>
+                                </h6>
+                                <p class="small text-muted">自分の理解度や学習プロセスを認識する力</p>
+                            </div>
+
+                            <!-- 思考の明確性 -->
+                            <div class="mb-4">
+                                <h6>
+                                    <i class="fas fa-lightbulb"></i> ⑦ 思考の明確性
+                                    <span class="badge bg-info float-end">
+                                        {{ analysis.thought_clarity.clarity_score }}/5
+                                    </span>
+                                </h6>
+                                <p class="small text-muted">思考を言語化する際の明確さと表現の質</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 会話ログサマリー -->
+                    <div class="card">
+                        <div class="card-header bg-light border-bottom">
+                            <h5 class="mb-0">
+                                <i class="fas fa-history"></i> 会話ログ（{{ raw_log_count }}件）
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-light">
+                                <h6>💬 会話のタイムライン</h6>
+                                <div style="max-height: 400px; overflow-y: auto;">
+                                    {% for msg in conversation %}
+                                        <div class="mb-3 pb-2 border-bottom" style="font-size: 0.95rem;">
+                                            {% if msg.role == 'user' %}
+                                                <span class="badge bg-primary">児童</span>
+                                            {% else %}
+                                                <span class="badge bg-success">AI</span>
+                                            {% endif %}
+                                            <p class="mb-0 mt-2" style="line-height: 1.6;">
+                                                {{ msg.content }}
+                                            </p>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 操作ボタン -->
+            <div class="text-center mt-4">
+                <a href="/teacher/analysis_form" class="btn btn-primary">
+                    <i class="fas fa-plus"></i> 新しい分析を実行
+                </a>
+                <a href="/teacher/dashboard" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left"></i> ダッシュボードに戻る
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.alert-sm {
+    padding: 0.25rem 0.75rem !important;
+    margin: 0 !important;
+}
+
+.card {
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+.badge {
+    font-weight: 500;
+}
+</style>
+{% endblock %}

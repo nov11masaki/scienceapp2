@@ -3200,8 +3200,14 @@ def analyze_student():
                 if ar:
                     conversation.append({'role': 'assistant', 'content': ar})
         
-        # 分析実行（会話ログ + 教員が入力した記述）
-        analysis = analyze_conversation_and_note(conversation, combined_note, unit=unit)
+        # 分析実行（会話ログ + 予想・考察テキスト）
+        analysis = analyze_conversation_and_note(
+            conversation, 
+            note_text='',  # 統合ノートは使わない
+            prediction_text=prediction_text,
+            reflection_text=reflection_text,
+            unit=unit
+        )
         
         return render_template(
             'teacher/analysis_result.html',

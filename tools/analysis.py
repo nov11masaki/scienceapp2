@@ -40,6 +40,12 @@ ALTERNATIVE_PATTERNS = ['もし', 'たとえば', '別の', 'ほか', '～だっ
 # 経験参照
 EXPERIENCE_PATTERNS = ['前に', 'この前', '経験', 'やったことある', 'やってみた', '見たことある']
 
+# 関係付けのパターン
+LINKING_PATTERNS = ['だから', 'なぜなら', 'なぜなら', 'ので', 'から', 'なことから', 'このため', 'だいたい']
+
+# 実験との結びつきパターン
+EXPERIMENT_LINKING = ['実験', 'じっけん', '試す', 'テスト', 'やってみた', '結果', 'けっか']
+
 
 # ===== 観点1: 思考の深化プロセス =====
 
@@ -541,16 +547,187 @@ def generate_teacher_summary_conversation_only(
     return summary
 
 
+# ===== 観点8: 予想と考察の分析 =====
+
+def analyze_prediction_and_reflection(
+    prediction_text: str = '',
+    reflection_text: str = '',
+    conversation: List[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """児童の予想と考察のテキストを分析する。
+    - 根拠の明確性（なぜそう思うのか）
+    - 関係付けの質（実験結果との結びつき）
+    - 概念理解の程度
+    
+    Args:
+        prediction_text: 児童が入力した予想のテキスト
+        reflection_text: 児童が入力した考察のテキスト
+        conversation: オプション：対応する会話ログ
+    
+    Returns:
+        予想・考察分析の結果
+    """
+    
+    if not prediction_text and not reflection_text:
+        return {
+            'prediction': {
+                'has_text': False,
+                'basis_count': 0,
+                'basis_clarity': 0,
+                'has_experience_reference': False
+            },
+            'reflection': {
+                'has_text': False,
+                'linking_count': 0,
+                'experiment_link_count': 0,
+                'consistency_with_prediction': 'N/A'
+            },
+            'overall_score': 0,
+            'interpretation': '予想・考察のテキストがありません。'
+        }
+    
+    # ===== 予想の分析 =====
+    prediction_analysis = {
+        'has_text': bool(prediction_text),
+        'text_length': len(prediction_text),
+        'basis_count': 0,
+        'basis_clarity': 0,  # 0-3スケール
+        'has_experience_reference': False,
+        'details': {}
+    }
+    
+    if prediction_text:
+        # 根拠の有無（「〜だから」「〜なぜなら」等）
+        basis_count = sum(prediction_text.count(pat) for pat in LINKING_PATTERNS)
+        prediction_analysis['basis_count'] = basis_count
+        
+        # 経験参照（「やったことある」等）
+        has_experience = any(pat in prediction_text for pat in EXPERIENCE_PATTERNS)
+        prediction_analysis['has_experience_reference'] = has_experience
+        
+        # 根拠の明確性スコア
+        clarity = 0
+        if 'だから' in prediction_text or 'なぜなら' in prediction_text:
+            clarity += 1
+        if has_experience:
+            clarity += 1
+        if len(prediction_text) > 30:  # 十分な説明量
+            clarity += 1
+        prediction_analysis['basis_clarity'] = min(clarity, 3)
+        
+        # 例示
+        prediction_analysis['details'] = {
+            'excerpt': prediction_text[:100],  # 最初の100文字
+            'includes_causal_marker': basis_count > 0,
+            'includes_concrete_reference': has_experience
+        }
+    
+    # ===== 考察の分析 =====
+    reflection_analysis = {
+        'has_text': bool(reflection_text),
+        'text_length': len(reflection_text),
+        'linking_count': 0,
+        'experiment_link_count': 0,
+        'prediction_consistency': 'unknown',
+        'details': {}
+    }
+    
+    if reflection_text:
+        # 関係付けの有無
+        linking_count = sum(reflection_text.count(pat) for pat in LINKING_PATTERNS)
+        reflection_analysis['linking_count'] = linking_count
+        
+        # 実験結果との結びつき
+        experiment_links = sum(reflection_text.count(pat) for pat in EXPERIMENT_LINKING)
+        reflection_analysis['experiment_link_count'] = experiment_links
+        
+        # 予想との一貫性判定（会話があれば参考にする）
+        if prediction_text:
+            # 簡易判定：同じキーワードが出ているか
+            pred_keywords = set(prediction_text.split())
+            refl_keywords = set(reflection_text.split())
+            overlap = len(pred_keywords & refl_keywords)
+            if overlap > 5:
+                reflection_analysis['prediction_consistency'] = 'consistent'
+            elif overlap > 2:
+                reflection_analysis['prediction_consistency'] = 'partly_consistent'
+            else:
+                reflection_analysis['prediction_consistency'] = 'different'
+        
+        # 例示
+        reflection_analysis['details'] = {
+            'excerpt': reflection_text[:100],
+            'has_causal_explanation': linking_count > 0,
+            'references_experiment': experiment_links > 0
+        }
+    
+    # ===== 総合スコアリング =====
+    overall_score = 0
+    
+    # 予想のスコア
+    if prediction_analysis['has_text']:
+        overall_score += prediction_analysis['basis_clarity']  # 0-3
+        if prediction_analysis['has_experience_reference']:
+            overall_score += 1
+    
+    # 考察のスコア
+    if reflection_analysis['has_text']:
+        overall_score += min(reflection_analysis['linking_count'], 3)  # 最大3
+        if reflection_analysis['experiment_link_count'] > 0:
+            overall_score += 1
+    
+    # 一貫性ボーナス
+    if reflection_analysis['prediction_consistency'] == 'consistent':
+        overall_score += 1
+    
+    # 解釈テキスト
+    interpretation_parts = []
+    
+    if prediction_analysis['basis_clarity'] >= 2:
+        interpretation_parts.append("✓ 予想に根拠がある")
+    elif prediction_analysis['has_text']:
+        interpretation_parts.append("→ 予想の根拠をもっと詳しく説明してみよう")
+    
+    if reflection_analysis['experiment_link_count'] > 0:
+        interpretation_parts.append("✓ 実験結果と関連付けできている")
+    elif reflection_analysis['has_text']:
+        interpretation_parts.append("→ 実験結果とどう関連するか考えよう")
+    
+    if reflection_analysis['prediction_consistency'] == 'consistent':
+        interpretation_parts.append("✓ 予想と考察が一貫している")
+    elif reflection_analysis['prediction_consistency'] == 'different':
+        interpretation_parts.append("→ 予想と考察で異なる結論。原因を探ろう")
+    
+    interpretation = " / ".join(interpretation_parts) if interpretation_parts else "予想・考察の分析が完了しました"
+    
+    return {
+        'prediction': prediction_analysis,
+        'reflection': reflection_analysis,
+        'overall_score': overall_score,
+        'max_score': 12,  # 最大スコア
+        'interpretation': interpretation,
+        'important_conversation_features': [
+            f"予想根拠度: {prediction_analysis['basis_clarity']}/3",
+            f"考察実験連結度: {min(reflection_analysis['experiment_link_count'], 3)}/3",
+            f"一貫性: {reflection_analysis['prediction_consistency']}"
+        ]
+    }
+
+
 # ===== メイン分析関数 =====
 
 def analyze_conversation_only(
     conversation: List[Dict[str, Any]], 
+    prediction_text: str = '',
+    reflection_text: str = '',
     unit: str = 'default'
 ) -> Dict[str, Any]:
     """会話履歴のみから多角的な学習効果を分析する。
     
     Args:
         conversation: [{'role': 'user'|'assistant', 'content': str}, ...]
+        prediction_text: 児童の予想テキスト（オプション）
+        reflection_text: 児童の考察テキスト（オプション）
         unit: 単元名（語彙リスト選択用）
     
     Returns:
@@ -568,6 +745,7 @@ def analyze_conversation_only(
     evidence = analyze_evidence_integration(conversation)
     metacognition = analyze_metacognition(user_messages)
     thought_quality = analyze_thought_clarity(user_messages)
+    prediction_reflection = analyze_prediction_and_reflection(prediction_text, reflection_text, conversation)
     
     summary = generate_teacher_summary_conversation_only(
         depth_analysis, vocab_analysis, engagement, structure, evidence, metacognition, thought_quality
@@ -582,6 +760,7 @@ def analyze_conversation_only(
         'evidence_integration': evidence,
         'metacognition': metacognition,
         'thought_clarity': thought_quality,
+        'prediction_and_reflection': prediction_reflection,
         'raw_data': {
             'total_turns': len(user_messages),
             'total_ai_responses': len(ai_messages)
@@ -593,7 +772,9 @@ def analyze_conversation_only(
 def analyze_conversation_and_note(
     conversation: List[Dict[str, Any]], 
     note_text: str = '',
+    prediction_text: str = '',
+    reflection_text: str = '',
     unit: str = 'default'
 ) -> Dict[str, Any]:
     """後方互換性のため残す（会話のみで分析）"""
-    return analyze_conversation_only(conversation, unit)
+    return analyze_conversation_only(conversation, prediction_text, reflection_text, unit)
