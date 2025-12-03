@@ -3131,6 +3131,8 @@ def teacher_analysis():
             logs = [log for log in logs if log.get('unit') == unit]
             print(f"[ANALYSIS] Filtered to {len(logs)} logs for unit={unit}")
         
+        print(f"[ANALYSIS] Sample logs: {logs[:3] if logs else 'No logs'}")
+        
         # クラス・座席番号別に会話を組み立て
         student_conversations = {}
         for log in logs:
@@ -3170,6 +3172,7 @@ def teacher_analysis():
         
         # 各学生の分析を実行
         analysis_results = {}
+        print(f"[ANALYSIS] Processing {len(student_conversations)} student conversations")
         for key, student_data in student_conversations.items():
             try:
                 analysis = analyze_conversation_only(
@@ -3191,6 +3194,8 @@ def teacher_analysis():
                 print(f"[ANALYSIS] Error analyzing {key}: {analysis_err}")
                 import traceback
                 traceback.print_exc()
+        
+        print(f"[ANALYSIS] Generated {len(analysis_results)} analysis results")
         
         # 単元ごとに集計
         prediction_chats = len([l for l in logs if l.get('log_type') == 'prediction_chat'])
