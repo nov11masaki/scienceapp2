@@ -19,6 +19,7 @@ import tempfile
 from pathlib import Path
 from functools import lru_cache, wraps
 from werkzeug.utils import secure_filename
+from tools.analysis import analyze_conversation_and_note
 
 # Optional analysis libraries (may not be available in all environments)
 try:
@@ -3141,6 +3142,75 @@ def teacher_analysis():
             'error': str(e),
             'traceback': traceback.format_exc()
         }), 500
+
+
+@app.route('/teacher/analysis_student')
+@require_teacher_auth
+def teacher_analysis_student():
+    """個別児童・単元の会話とノートを解析して詳細な指標を返す
+    クエリ: class, seat, unit, date (date は省略可、デフォルトは最新)"""
+    class_param = request.args.get('class')
+    seat = request.args.get('seat')
+    unit = request.args.get('unit', '')
+    date = request.args.get('date', datetime.now().strftime('%Y%m%d'))
+
+    class_num = normalize_class_value_int(class_param)
+
+    # ログ読み込み（date=ALL をサポート）
+    logs = []
+    if date == 'ALL':
+        dates = get_available_log_dates()
+        for d in dates:
+            logs.extend(load_learning_logs(d))
+    else:
+        logs = load_learning_logs(date)
+
+    # フィルタ: class, seat, unit
+    filtered = []
+    for log in logs:
+        if class_num is not None and log.get('class_num') != class_num:
+            continue
+        if seat and str(log.get('seat_num')) != str(seat):
+            continue
+        if unit and log.get('unit') != unit:
+            continue
+        filtered.append(log)
+
+    # 会話履歴と最終ノートを組み立て
+    conversation = []
+    final_note = ''
+    # prediction_chat/reflection_chat を時系列で取得
+    sorted_logs = sorted(filtered, key=lambda x: x.get('timestamp', ''))
+    for log in sorted_logs:
+        lt = log.get('log_type')
+        data = log.get('data', {})
+        if lt in ('prediction_chat', 'reflection_chat'):
+            # data contains user_message and ai_response
+            um = data.get('user_message', '')
+            ar = data.get('ai_response', '')
+            if um:
+                conversation.append({'role': 'user', 'content': um})
+            if ar:
+                conversation.append({'role': 'assistant', 'content': ar})
+        elif lt == 'final_summary' or lt == 'prediction_summary':
+            # store final note (prefer final_summary)
+            if lt == 'final_summary':
+                final_note = data.get('final_summary') or final_note
+            else:
+                final_note = final_note or data.get('summary', '')
+
+    # 実行
+    analysis = analyze_conversation_and_note(conversation, final_note)
+
+    return jsonify({
+        'success': True,
+        'class': class_num,
+        'seat': seat,
+        'unit': unit,
+        'date': date,
+        'analysis': analysis,
+        'raw_log_count': len(filtered)
+    })
 
 
 def analyze_predictions_and_reflections(logs):
