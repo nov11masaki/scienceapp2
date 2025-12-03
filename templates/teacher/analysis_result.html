@@ -3,7 +3,7 @@
 {% block title %}予想・考察分析{% endblock %}
 
 {% block content %}
-<div class="analysis-dashboard-page" data-analysis='{{ analysis_data | tojson | raw }}'>
+<div class="analysis-dashboard-page" data-analysis='{{ analysis_data | tojson | safe }}'>
     <!-- ヘッダー -->
     <header class="analysis-header">
         <div class="header-container">
