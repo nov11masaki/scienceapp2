@@ -95,27 +95,9 @@ document.addEventListener('DOMContentLoaded', function() {
 // 分析データを読み込む（フィルター変更時）
 function loadAnalysis() {
     const unit = document.getElementById('unitSelect').value;
-
-    fetch(`/teacher/analysis?unit=${unit}`)
-        .then(response => {
-            if (!response.ok) {
-                return response.text().then(text => {
-                    throw new Error(`HTTP ${response.status}: ${text.substring(0, 100)}`);
-                });
-            }
-            return response.json();
-        })
-        .then(data => {
-            if (data.success) {
-                displayAnalysis(data);
-            } else {
-                alert('分析に失敗しました: ' + data.error);
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            alert('エラーが発生しました: ' + error.message);
-        });
+    // ページをリロード（新しい単元フィルタを適用）
+    const url = `/teacher/analysis${unit ? '?unit=' + encodeURIComponent(unit) : ''}`;
+    window.location.href = url;
 }
 
 // 分析結果を表示
