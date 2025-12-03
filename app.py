@@ -19,7 +19,6 @@ import tempfile
 from pathlib import Path
 from functools import lru_cache, wraps
 from werkzeug.utils import secure_filename
-from tools.analysis import analyze_conversation_and_note, analyze_conversation_only, analyze_prediction_and_reflection_detailed
 
 # Optional analysis libraries (may not be available in all environments)
 try:
@@ -1240,21 +1239,6 @@ def get_available_log_dates():
     
     return dates_list
 
-def load_all_learning_logs():
-    """全期間の学習ログを読み込み"""
-    all_logs = []
-    dates = get_available_log_dates()
-    
-    for date in dates:
-        try:
-            logs = load_learning_logs(date)
-            all_logs.extend(logs)
-        except Exception as e:
-            print(f"[LOAD_ALL] Error loading logs for {date}: {e}")
-    
-    print(f"[LOAD_ALL] Loaded total {len(all_logs)} logs from {len(dates)} dates")
-    return all_logs
-
 # エラーログ管理機能
 def save_error_log(student_number, class_number, error_message, error_type, stage, unit, additional_info=None):
     """児童のエラーをログに記録
@@ -1595,16 +1579,9 @@ def select_unit():
     
     # 各単元の進行状況をチェック
     unit_progress = {}
-    # クラス別アクセス制限を定義
-    # 1組: 「空気の温度と体積」「金属の温度と体積」アクセス可能
-    # 2～4組: 「空気の温度と体積」のみアクセス可能
-    # 5組: すべての単元にアクセス可能
-    class_accessible_units = {
-        '1': ['空気の温度と体積', '金属の温度と体積'],
-        '2': ['空気の温度と体積'],
-        '3': ['空気の温度と体積'],
-        '4': ['空気の温度と体積'],
-        '5': UNITS  # すべての単元
+    # 1組限定単元を定義
+    class_restricted_units = {
+        "金属の温度と体積": "1"  # 1組のみアクセス可能
     }
     
     for unit in UNITS:
@@ -1620,9 +1597,9 @@ def select_unit():
         reflection_summary_created = stage_progress.get('reflection', {}).get('summary_created', False)
         reflection_needs_resumption = reflection_started and stage_progress.get('reflection', {}).get('conversation_count', 0) > 0 and not reflection_summary_created
         
-        # クラス別アクセス制限チェック
-        accessible_units = class_accessible_units.get(str(class_number), [])
-        can_access = unit in accessible_units
+        # 1組限定単元のアクセス制限チェック
+        is_restricted = unit in class_restricted_units
+        can_access = not is_restricted or (is_restricted and str(class_number) == str(class_restricted_units[unit]))
         
         unit_progress[unit] = {
             'current_stage': progress['current_stage'],
@@ -1637,10 +1614,12 @@ def select_unit():
             'reflection_summary_created': reflection_summary_created,
             'reflection_needs_resumption': reflection_needs_resumption,
             # アクセス制限情報
-            'can_access': can_access
+            'is_restricted': is_restricted,
+            'can_access': can_access,
+            'restricted_to_class': class_restricted_units.get(unit) if is_restricted else None
         }
     
-    return render_template('select_unit.html', units=UNITS, unit_progress=unit_progress)
+    return render_template('select_unit.html', units=UNITS, unit_progress=unit_progress, class_restricted_units=class_restricted_units)
 
 @app.route('/prediction')
 def prediction():
@@ -1649,19 +1628,15 @@ def prediction():
     student_number = request.args.get('number', session.get('student_number', '1'))
     unit = request.args.get('unit')
     
-    # クラス別アクセス制限チェック
-    class_accessible_units = {
-        '1': ['空気の温度と体積', '金属の温度と体積'],
-        '2': ['空気の温度と体積'],
-        '3': ['空気の温度と体積'],
-        '4': ['空気の温度と体積'],
-        '5': UNITS
+    # 1組限定単元のアクセス制限チェック
+    class_restricted_units = {
+        "金属の温度と体積": "1"  # 1組のみアクセス可能
     }
-    
-    accessible_units = class_accessible_units.get(str(class_number), [])
-    if unit not in accessible_units:
-        flash(f'申し訳ありません。「{unit}」はこのクラスではアクセスが不可です。', 'danger')
-        return redirect(url_for('select_unit', class_number=class_number, number=student_number))
+    if unit in class_restricted_units:
+        allowed_class = class_restricted_units[unit]
+        if str(class_number) != str(allowed_class):
+            flash(f'申し訳ありません。「{unit}」は{allowed_class}組のみアクセスが可能です。', 'danger')
+            return redirect(url_for('select_unit', class_number=class_number, number=student_number))
     
     # 異なる単元に移動した場合、セッションをクリア
     current_unit = session.get('unit')
@@ -2259,19 +2234,15 @@ def reflection():
     class_number = normalize_class_value(session.get('class_number', '1')) or '1'
     student_number = session.get('student_number')
     
-    # クラス別アクセス制限チェック
-    class_accessible_units = {
-        '1': ['空気の温度と体積', '金属の温度と体積'],
-        '2': ['空気の温度と体積'],
-        '3': ['空気の温度と体積'],
-        '4': ['空気の温度と体積'],
-        '5': UNITS
+    # 1組限定単元のアクセス制限チェック
+    class_restricted_units = {
+        "金属の温度と体積": "1"  # 1組のみアクセス可能
     }
-    
-    accessible_units = class_accessible_units.get(str(class_number), [])
-    if unit not in accessible_units:
-        flash(f'申し訳ありません。「{unit}」はこのクラスではアクセスが不可です。', 'danger')
-        return redirect(url_for('select_unit', class_number=class_number, number=student_number))
+    if unit in class_restricted_units:
+        allowed_class = class_restricted_units[unit]
+        if str(class_number) != str(allowed_class):
+            flash(f'申し訳ありません。「{unit}」は{allowed_class}組のみアクセスが可能です。', 'danger')
+            return redirect(url_for('select_unit', class_number=class_number, number=student_number))
     
     session['class_number'] = class_number
     prediction_summary = session.get('prediction_summary')
@@ -3109,117 +3080,58 @@ def api_students_by_class():
 
 # ===== 分析機能 =====
 
+@app.route('/teacher/analysis_dashboard')
+def analysis_dashboard():
+    """教員用分析ダッシュボード"""
+    return render_template('teacher/analysis_dashboard.html', units=UNITS)
+
+
 @app.route('/teacher/analysis')
 @require_teacher_auth
 def teacher_analysis():
-    """教員用分析ダッシュボード（全期間対応）"""
+    """教員用分析ダッシュボード"""
     unit = request.args.get('unit', '')
-    # dateパラメータがない場合は全期間を対象
-    date = request.args.get('date', None)
+    date = request.args.get('date', datetime.now().strftime('%Y%m%d'))
     
     try:
-        # ログを読み込み（全期間または指定日付）
-        if date:
-            print(f"[ANALYSIS] Loading logs for date={date}, unit={unit}")
-            logs = load_learning_logs(date)
-        else:
-            print(f"[ANALYSIS] Loading all logs for unit={unit}")
-            logs = load_all_learning_logs()
+        # ログを読み込み
+        print(f"[ANALYSIS] Loading logs for date={date}, unit={unit}")
+        logs = load_learning_logs(date)
         print(f"[ANALYSIS] Loaded {len(logs)} logs")
         
         if unit:
             logs = [log for log in logs if log.get('unit') == unit]
             print(f"[ANALYSIS] Filtered to {len(logs)} logs for unit={unit}")
         
-        print(f"[ANALYSIS] Sample logs: {logs[:3] if logs else 'No logs'}")
-        
-        # クラス・座席番号別に会話を組み立て
-        student_conversations = {}
-        for log in logs:
-            class_num = log.get('class_num')
-            seat_num = log.get('seat_num')
-            log_unit = log.get('unit')
-            log_type = log.get('log_type')
-            data = log.get('data', {})
-            
-            key = f"{class_num}_{seat_num}_{log_unit}"
-            if key not in student_conversations:
-                student_conversations[key] = {
-                    'class_num': class_num,
-                    'seat_num': seat_num,
-                    'unit': log_unit,
-                    'conversation': [],
-                    'prediction_text': '',
-                    'reflection_text': ''
-                }
-            
-            # 会話ログを組み立て
-            if log_type in ('prediction_chat', 'reflection_chat'):
-                if data.get('user_message'):
-                    student_conversations[key]['conversation'].append({
-                        'role': 'user',
-                        'content': data.get('user_message', '')
-                    })
-                if data.get('ai_response'):
-                    student_conversations[key]['conversation'].append({
-                        'role': 'assistant',
-                        'content': data.get('ai_response', '')
-                    })
-            elif log_type == 'prediction_summary':
-                student_conversations[key]['prediction_text'] = data.get('summary', '')
-            elif log_type == 'final_summary':
-                student_conversations[key]['reflection_text'] = data.get('final_summary', '')
-        
-        # 各学生の分析を実行
-        analysis_results = {}
-        print(f"[ANALYSIS] Processing {len(student_conversations)} student conversations")
-        for key, student_data in student_conversations.items():
-            try:
-                analysis = analyze_conversation_only(
-                    student_data['conversation'],
-                    student_data['prediction_text'],
-                    student_data['reflection_text'],
-                    student_data['unit']
-                )
-                
-                # 詳細分析（埋め込みと詳細メトリクス）
-                detailed_analysis = analyze_prediction_and_reflection_detailed(
-                    student_data['prediction_text'],
-                    student_data['reflection_text']
-                )
-                
-                analysis_results[key] = {
-                    'class_num': student_data['class_num'],
-                    'seat_num': student_data['seat_num'],
-                    'unit': student_data['unit'],
-                    'analysis': analysis,
-                    'detailed_analysis': detailed_analysis,
-                    'conversation_count': len(student_data['conversation']),
-                    'has_prediction': bool(student_data['prediction_text']),
-                    'has_reflection': bool(student_data['reflection_text'])
-                }
-            except Exception as analysis_err:
-                print(f"[ANALYSIS] Error analyzing {key}: {analysis_err}")
-                import traceback
-                traceback.print_exc()
-        
-        print(f"[ANALYSIS] Generated {len(analysis_results)} analysis results")
-        
-        # 単元ごとに集計
-        prediction_chats = len([l for l in logs if l.get('log_type') == 'prediction_chat'])
-        reflection_chats = len([l for l in logs if l.get('log_type') == 'reflection_chat'])
-        
-        return render_template('teacher/analysis_result.html', 
-            units=UNITS,
-            analysis_data={
-                'success': True,
-                'unit': unit,
+        # 分析を実行（エラーが起きても部分的な結果を返す）
+        try:
+            analysis_result = analyze_predictions_and_reflections(logs)
+            print(f"[ANALYSIS] Analysis completed successfully")
+        except Exception as analysis_err:
+            print(f"[ANALYSIS] Analysis failed: {analysis_err}")
+            import traceback
+            traceback.print_exc()
+            # 最小限の結果を返す
+            analysis_result = {
                 'total_logs': len(logs),
-                'prediction_chats': prediction_chats,
-                'reflection_chats': reflection_chats,
-                'student_analyses': analysis_results
+                'prediction_chats': len([l for l in logs if l.get('log_type') == 'prediction_chat']),
+                'reflection_chats': len([l for l in logs if l.get('log_type') == 'reflection_chat']),
+                'predictions_by_unit': {},
+                'reflections_by_unit': {},
+                'text_analysis': {},
+                'embeddings_analysis': {},
+                'insights': {},
+                'prompt_recommendations': {},
+                'error': str(analysis_err)
             }
-        )
+        
+        return jsonify({
+            'success': True,
+            'date': date,
+            'unit': unit,
+            'analysis': analysis_result,
+            'log_count': len(logs)
+        })
     except Exception as e:
         print(f"[ANALYSIS] Fatal error: {e}")
         import traceback
@@ -3229,162 +3141,6 @@ def teacher_analysis():
             'error': str(e),
             'traceback': traceback.format_exc()
         }), 500
-
-
-@app.route('/teacher/analysis_form')
-@require_teacher_auth
-def teacher_analysis_form():
-    """学習分析入力フォームを表示"""
-    return render_template('teacher/analysis_input.html')
-
-
-@app.route('/teacher/analyze_student', methods=['POST'])
-@require_teacher_auth
-def analyze_student():
-    """児童の分析フォーム（予想+考察入力）から分析を実行"""
-    try:
-        class_num = request.form.get('class_num')
-        seat_num = request.form.get('seat_num')
-        unit = request.form.get('unit', '')
-        prediction_text = request.form.get('prediction', '').strip()
-        reflection_text = request.form.get('reflection', '').strip()
-        
-        if not all([class_num, seat_num, unit, prediction_text, reflection_text]):
-            return jsonify({'success': False, 'error': '全ての項目を入力してください'}), 400
-        
-        # ノート内容を統合（予想→考察の順）
-        combined_note = f"【予想】\n{prediction_text}\n\n【考察】\n{reflection_text}"
-        
-        # GCS/ローカルから会話ログを取得
-        dates = get_available_log_dates()
-        logs = []
-        for d in dates:
-            logs.extend(load_learning_logs(d))
-        
-        # フィルタ: class, seat, unit にマッチするログを取得
-        class_num_int = normalize_class_value_int(class_num)
-        filtered = []
-        for log in logs:
-            if class_num_int is not None and log.get('class_num') != class_num_int:
-                continue
-            if str(log.get('seat_num')) != str(seat_num):
-                continue
-            if log.get('unit') != unit:
-                continue
-            filtered.append(log)
-        
-        # 会話履歴を時系列で組み立て
-        conversation = []
-        sorted_logs = sorted(filtered, key=lambda x: x.get('timestamp', ''))
-        for log in sorted_logs:
-            lt = log.get('log_type')
-            data = log.get('data', {})
-            if lt in ('prediction_chat', 'reflection_chat'):
-                um = data.get('user_message', '')
-                ar = data.get('ai_response', '')
-                if um:
-                    conversation.append({'role': 'user', 'content': um})
-                if ar:
-                    conversation.append({'role': 'assistant', 'content': ar})
-        
-        # 分析実行（会話ログ + 予想・考察テキスト）
-        analysis = analyze_conversation_and_note(
-            conversation, 
-            note_text='',  # 統合ノートは使わない
-            prediction_text=prediction_text,
-            reflection_text=reflection_text,
-            unit=unit
-        )
-        
-        return render_template(
-            'teacher/analysis_result.html',
-            class_num=class_num,
-            seat_num=seat_num,
-            unit=unit,
-            prediction_text=prediction_text,
-            reflection_text=reflection_text,
-            conversation=conversation,
-            analysis=analysis,
-            raw_log_count=len(filtered)
-        )
-        
-    except Exception as e:
-        import traceback
-        print(f"分析エラー: {e}")
-        print(traceback.format_exc())
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
-@app.route('/teacher/analysis_student')
-@require_teacher_auth
-def teacher_analysis_student():
-    """個別児童・単元の会話とノートを解析して詳細な指標を返す
-    クエリ: class, seat, unit, date (date は省略可、デフォルトは最新)"""
-    class_param = request.args.get('class')
-    seat = request.args.get('seat')
-    unit = request.args.get('unit', '')
-    date = request.args.get('date', datetime.now().strftime('%Y%m%d'))
-
-    class_num = normalize_class_value_int(class_param)
-
-    # ログ読み込み（date=ALL をサポート）
-    logs = []
-    if date == 'ALL':
-        dates = get_available_log_dates()
-        for d in dates:
-            logs.extend(load_learning_logs(d))
-    else:
-        logs = load_learning_logs(date)
-
-    # フィルタ: class, seat, unit
-    filtered = []
-    for log in logs:
-        if class_num is not None and log.get('class_num') != class_num:
-            continue
-        if seat and str(log.get('seat_num')) != str(seat):
-            continue
-        if unit and log.get('unit') != unit:
-            continue
-        filtered.append(log)
-
-    # 会話履歴と最終ノートを組み立て
-    conversation = []
-    final_note = ''
-    # prediction_chat/reflection_chat を時系列で取得
-    sorted_logs = sorted(filtered, key=lambda x: x.get('timestamp', ''))
-    for log in sorted_logs:
-        lt = log.get('log_type')
-        data = log.get('data', {})
-        if lt in ('prediction_chat', 'reflection_chat'):
-            # data contains user_message and ai_response
-            um = data.get('user_message', '')
-            ar = data.get('ai_response', '')
-            if um:
-                conversation.append({'role': 'user', 'content': um})
-            if ar:
-                conversation.append({'role': 'assistant', 'content': ar})
-        elif lt == 'final_summary' or lt == 'prediction_summary':
-            # store final note (prefer final_summary)
-            if lt == 'final_summary':
-                final_note = data.get('final_summary') or final_note
-            else:
-                final_note = final_note or data.get('summary', '')
-
-    # 実行
-    analysis = analyze_conversation_and_note(conversation, final_note)
-
-    return jsonify({
-        'success': True,
-        'class': class_num,
-        'seat': seat,
-        'unit': unit,
-        'date': date,
-        'analysis': analysis,
-        'raw_log_count': len(filtered)
-    })
 
 
 def analyze_predictions_and_reflections(logs):
