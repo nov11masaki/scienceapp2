@@ -2985,7 +2985,22 @@ def student_detail():
     selected_date = request.args.get('date', default_date)
     
     # 学習ログを読み込み
-    logs = load_learning_logs(selected_date)
+    # teacher/logs では 'ALL' をサポートしているため、ここでも同様に処理する
+    if selected_date == 'ALL':
+        logs = []
+        try:
+            dates = get_available_log_dates()
+            for d in dates:
+                try:
+                    day_logs = load_learning_logs(d)
+                    logs.extend(day_logs)
+                except Exception as e:
+                    print(f"[DETAIL] Error loading logs for {d}: {e}")
+        except Exception as e:
+            print(f"[DETAIL] Error listing dates for ALL: {e}")
+            logs = []
+    else:
+        logs = load_learning_logs(selected_date)
     
     # 該当する児童のログを抽出（クラスと出席番号で絞り込み）
     student_logs = []
