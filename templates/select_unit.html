@@ -75,6 +75,37 @@
                     {% endif %}
                     {% endfor %}
                 </div>
+
+                <!-- アクセス不可な単元の表示 -->
+                <div class="row g-4 mt-2">
+                    {% for unit in units %}
+                    {% if unit_progress and unit in unit_progress and not unit_progress[unit].can_access %}
+                        <div class="col-lg-4 col-md-6">
+                            <div class="unit-card-wrapper opacity-50">
+                                <div class="unit-card">
+                                    <div class="unit-icon text-muted">
+                                        {% if '温度' in unit %}
+                                            <i class="fas fa-thermometer-half"></i>
+                                        {% elif 'あたたまり' in unit %}
+                                            <i class="fas fa-fire"></i>
+                                        {% elif 'ふっとう' in unit %}
+                                            <i class="fas fa-tint"></i>
+                                        {% elif '冷やした' in unit %}
+                                            <i class="fas fa-snowflake"></i>
+                                        {% else %}
+                                            <i class="fas fa-flask"></i>
+                                        {% endif %}
+                                    </div>
+                                    <h5 class="unit-title text-muted">{{ unit }}</h5>
+                                    <div class="alert alert-warning alert-sm py-2 px-2 mb-0" style="font-size: 0.8rem;">
+                                        <i class="fas fa-lock"></i> このクラスではアクセスできません
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    {% endif %}
+                    {% endfor %}
+                </div>
             </div>
         </div>
         
@@ -108,19 +139,10 @@ document.getElementById('selectedNumber').textContent = studentNumber;
 const unitProgressElement = document.getElementById('unit-progress-data');
 const unitProgress = unitProgressElement ? JSON.parse(unitProgressElement.textContent) : {};
 
-// 1組限定単元を定義
-const classRestrictedUnits = {
-    "金属の温度と体積": "1"
-};
-
-// 進行状況に基づいてボタンを有効/無効化
-function updateButtons() {
-    // アクセス不可な単元はテンプレートレベルで非表示なので、
-    // ここではボタンの初期化処理のみ実行（将来の拡張用）
-}
-
 // ページロード時に初期化
-document.addEventListener('DOMContentLoaded', updateButtons);
+document.addEventListener('DOMContentLoaded', function() {
+    // アクセス不可な単元はテンプレートレベルで制御されます
+});
 
 function goToPrediction(unit) {
     const predictionSummaryCreated = unitProgress[unit] && unitProgress[unit].prediction_summary_created;
