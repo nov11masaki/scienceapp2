@@ -1581,10 +1581,11 @@ def select_unit():
     # 各単元の進行状況をチェック
     unit_progress = {}
     # クラス別アクセス制限を定義
-    # 1～4組: 「空気の温度と体積」のみアクセス可能
+    # 1組: 「空気の温度と体積」「金属の温度と体積」アクセス可能
+    # 2～4組: 「空気の温度と体積」のみアクセス可能
     # 5組: すべての単元にアクセス可能
     class_accessible_units = {
-        '1': ['空気の温度と体積'],
+        '1': ['空気の温度と体積', '金属の温度と体積'],
         '2': ['空気の温度と体積'],
         '3': ['空気の温度と体積'],
         '4': ['空気の温度と体積'],
@@ -1635,7 +1636,7 @@ def prediction():
     
     # クラス別アクセス制限チェック
     class_accessible_units = {
-        '1': ['空気の温度と体積'],
+        '1': ['空気の温度と体積', '金属の温度と体積'],
         '2': ['空気の温度と体積'],
         '3': ['空気の温度と体積'],
         '4': ['空気の温度と体積'],
@@ -2243,15 +2244,19 @@ def reflection():
     class_number = normalize_class_value(session.get('class_number', '1')) or '1'
     student_number = session.get('student_number')
     
-    # 1組限定単元のアクセス制限チェック
-    class_restricted_units = {
-        "金属の温度と体積": "1"  # 1組のみアクセス可能
+    # クラス別アクセス制限チェック
+    class_accessible_units = {
+        '1': ['空気の温度と体積', '金属の温度と体積'],
+        '2': ['空気の温度と体積'],
+        '3': ['空気の温度と体積'],
+        '4': ['空気の温度と体積'],
+        '5': UNITS
     }
-    if unit in class_restricted_units:
-        allowed_class = class_restricted_units[unit]
-        if str(class_number) != str(allowed_class):
-            flash(f'申し訳ありません。「{unit}」は{allowed_class}組のみアクセスが可能です。', 'danger')
-            return redirect(url_for('select_unit', class_number=class_number, number=student_number))
+    
+    accessible_units = class_accessible_units.get(str(class_number), [])
+    if unit not in accessible_units:
+        flash(f'申し訳ありません。「{unit}」はこのクラスではアクセスが不可です。', 'danger')
+        return redirect(url_for('select_unit', class_number=class_number, number=student_number))
     
     session['class_number'] = class_number
     prediction_summary = session.get('prediction_summary')
