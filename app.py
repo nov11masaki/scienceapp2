@@ -3175,17 +3175,20 @@ def analyze_student():
         prediction_text = request.form.get('prediction', '').strip()
         reflection_text = request.form.get('reflection', '').strip()
         
+        print(f"[ANALYZE] 入力データ: class={class_num}, seat={seat_num}, unit={unit}")
+        print(f"[ANALYZE] 予想: {prediction_text[:50] if prediction_text else '(空)'}")
+        print(f"[ANALYZE] 考察: {reflection_text[:50] if reflection_text else '(空)'}")
+        
         if not all([class_num, seat_num, unit, prediction_text, reflection_text]):
             return jsonify({'success': False, 'error': '全ての項目を入力してください'}), 400
-        
-        # ノート内容を統合（予想→考察の順）
-        combined_note = f"【予想】\n{prediction_text}\n\n【考察】\n{reflection_text}"
         
         # GCS/ローカルから会話ログを取得
         dates = get_available_log_dates()
         logs = []
         for d in dates:
             logs.extend(load_learning_logs(d))
+        
+        print(f"[ANALYZE] 全ログ数: {len(logs)}")
         
         # フィルタ: class, seat, unit にマッチするログを取得
         class_num_int = normalize_class_value_int(class_num)
@@ -3198,6 +3201,8 @@ def analyze_student():
             if log.get('unit') != unit:
                 continue
             filtered.append(log)
+        
+        print(f"[ANALYZE] フィルタ後: {len(filtered)} ログ")
         
         # 会話履歴を時系列で組み立て
         conversation = []
@@ -3213,14 +3218,18 @@ def analyze_student():
                 if ar:
                     conversation.append({'role': 'assistant', 'content': ar})
         
+        print(f"[ANALYZE] 会話数: {len(conversation)}")
+        
         # 分析実行（会話ログ + 予想・考察テキスト）
         analysis = analyze_conversation_and_note(
             conversation, 
-            note_text='',  # 統合ノートは使わない
+            note_text='',
             prediction_text=prediction_text,
             reflection_text=reflection_text,
             unit=unit
         )
+        
+        print(f"[ANALYZE] 分析完了: summary={analysis.get('summary', '(なし)')[:50]}")
         
         return render_template(
             'teacher/analysis_result.html',
