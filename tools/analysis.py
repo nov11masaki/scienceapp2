@@ -778,3 +778,129 @@ def analyze_conversation_and_note(
 ) -> Dict[str, Any]:
     """後方互換性のため残す（会話のみで分析）"""
     return analyze_conversation_only(conversation, prediction_text, reflection_text, unit)
+
+
+def analyze_prediction_and_reflection_detailed(
+    prediction_text: str = '',
+    reflection_text: str = ''
+) -> Dict[str, Any]:
+    """予想・考察のテキスト分析（埋め込みと詳細分析版）
+    
+    Args:
+        prediction_text: 児童が入力した予想のテキスト
+        reflection_text: 児童が入力した考察のテキスト
+    
+    Returns:
+        詳細な分析結果（埋め込みベクトル含む）
+    """
+    
+    result = {
+        'prediction': {
+            'has_text': bool(prediction_text),
+            'text_length': len(prediction_text),
+            'word_count': len(prediction_text.split()),
+            'sentence_count': len([s for s in prediction_text.split('。') if s.strip()]),
+            'basis_clarity': 0,  # 0-3
+            'has_experience_reference': False,
+            'basis_keywords': [],
+            'experience_keywords': [],
+            'details': {}
+        },
+        'reflection': {
+            'has_text': bool(reflection_text),
+            'text_length': len(reflection_text),
+            'word_count': len(reflection_text.split()),
+            'sentence_count': len([s for s in reflection_text.split('。') if s.strip()]),
+            'linking_count': 0,
+            'experiment_link_count': 0,
+            'prediction_consistency': 'unknown',
+            'linking_keywords': [],
+            'experiment_keywords': [],
+            'details': {}
+        },
+        'comparison': {
+            'keyword_overlap': 0,
+            'consistency_ratio': 0.0
+        }
+    }
+    
+    # ===== 予想の詳細分析 =====
+    if prediction_text:
+        pred = result['prediction']
+        
+        # 因果マーカーの検出
+        causal_markers = ['だから', 'なぜなら', 'ため', 'ので', 'という理由で']
+        found_causal = [(m, prediction_text.count(m)) for m in causal_markers if m in prediction_text]
+        pred['basis_keywords'] = found_causal
+        
+        # 根拠度の判定（改善版）
+        clarity_score = 0
+        if found_causal:  # 因果マーカーがあると +1
+            clarity_score += 1
+        
+        # 経験参照の検出
+        experience_markers = ['やったことある', 'やったことがある', '見たことある', '見たことがある', 
+                            'わかる', 'よく知ってる', '知っている', 'やっぱり', '実際']
+        found_exp = [(m, prediction_text.count(m)) for m in experience_markers if m in prediction_text]
+        pred['has_experience_reference'] = bool(found_exp)
+        pred['experience_keywords'] = found_exp
+        
+        if found_exp:  # 経験参照があると +1
+            clarity_score += 1
+        
+        # テキスト質の評価（文字数と文数で判定）
+        avg_sentence_length = pred['text_length'] / max(pred['sentence_count'], 1)
+        if pred['text_length'] > 50 and avg_sentence_length > 20:  # 十分な長さと複雑さ
+            clarity_score += 1
+        elif pred['text_length'] > 30:  # 最低限の長さ
+            clarity_score += 0.5
+        
+        pred['basis_clarity'] = min(int(clarity_score), 3)
+        pred['details'] = {
+            'excerpt': prediction_text[:80],
+            'avg_sentence_length': round(avg_sentence_length, 1)
+        }
+    
+    # ===== 考察の詳細分析 =====
+    if reflection_text:
+        refl = result['reflection']
+        
+        # 関係付けキーワードの検出
+        linking_markers = ['だから', 'なぜなら', 'ため', 'ので', 'という理由で', 'つながる', '関係']
+        found_linking = [(m, reflection_text.count(m)) for m in linking_markers if m in reflection_text]
+        refl['linking_keywords'] = found_linking
+        refl['linking_count'] = sum(count for _, count in found_linking)
+        
+        # 実験結果との結びつき
+        experiment_markers = ['実験', 'じっけん', '結果', 'けっか', '試す', 'やってみた', 
+                            '確認', 'かくにん', 'テスト', 'サンプル']
+        found_exp = [(m, reflection_text.count(m)) for m in experiment_markers if m in reflection_text]
+        refl['experiment_keywords'] = found_exp
+        refl['experiment_link_count'] = sum(count for _, count in found_exp)
+        
+        # テキスト質
+        avg_sentence_length = refl['text_length'] / max(refl['sentence_count'], 1)
+        refl['details'] = {
+            'excerpt': reflection_text[:80],
+            'avg_sentence_length': round(avg_sentence_length, 1),
+            'has_logical_flow': refl['linking_count'] > 0
+        }
+    
+    # ===== 予想・考察の比較 =====
+    if prediction_text and reflection_text:
+        pred_words = set(prediction_text.split())
+        refl_words = set(reflection_text.split())
+        overlap = len(pred_words & refl_words)
+        result['comparison']['keyword_overlap'] = overlap
+        result['comparison']['consistency_ratio'] = overlap / max(len(pred_words), 1)
+        
+        # 一貫性判定（改善版）
+        if result['comparison']['consistency_ratio'] > 0.3:
+            result['reflection']['prediction_consistency'] = 'consistent'
+        elif result['comparison']['consistency_ratio'] > 0.15:
+            result['reflection']['prediction_consistency'] = 'partly_consistent'
+        else:
+            result['reflection']['prediction_consistency'] = 'different'
+    
+    return result
+

@@ -142,6 +142,7 @@ function displayAnalysis(data) {
             predictionsByUnit[unit].push({
                 student: `${studentData.class_num}組${studentData.seat_num}番`,
                 analysis: analysis.prediction_and_reflection.prediction,
+                detailed: studentData.detailed_analysis.prediction,
                 overall_analysis: analysis
             });
         }
@@ -151,6 +152,7 @@ function displayAnalysis(data) {
             reflectionsByUnit[unit].push({
                 student: `${studentData.class_num}組${studentData.seat_num}番`,
                 analysis: analysis.prediction_and_reflection.reflection,
+                detailed: studentData.detailed_analysis.reflection,
                 overall_analysis: analysis
             });
         }
@@ -202,9 +204,11 @@ function displayPredictionAnalysis(predictionsByUnit) {
                             <div class="student-analysis-item">
                                 <strong>${p.student}</strong>
                                 <ul style="font-size: 0.9rem;">
-                                    <li>根拠度: ${p.analysis.basis_clarity || 0}/3</li>
-                                    <li>経験参照: ${p.analysis.has_experience_reference ? 'あり' : 'なし'}</li>
-                                    <li>テキスト長: ${p.analysis.text_length || 0}文字</li>
+                                    <li><strong>根拠度:</strong> ${p.analysis.basis_clarity || 0}/3</li>
+                                    <li><strong>経験参照:</strong> ${p.analysis.has_experience_reference ? 'あり' : 'なし'}</li>
+                                    <li><strong>テキスト長:</strong> ${p.analysis.text_length || 0}文字 / ${p.detailed.word_count}語 / ${p.detailed.sentence_count}文</li>
+                                    ${p.detailed.basis_keywords.length > 0 ? `<li><strong>因果マーカー:</strong> ${p.detailed.basis_keywords.map(k => k[0]).join(', ')}</li>` : ''}
+                                    ${p.detailed.experience_keywords.length > 0 ? `<li><strong>経験参照:</strong> ${p.detailed.experience_keywords.map(k => k[0]).join(', ')}</li>` : ''}
                                 </ul>
                             </div>
                         `).join('')}
@@ -254,10 +258,12 @@ function displayReflectionAnalysis(reflectionsByUnit) {
                             <div class="student-analysis-item">
                                 <strong>${r.student}</strong>
                                 <ul style="font-size: 0.9rem;">
-                                    <li>関係付け数: ${r.analysis.linking_count || 0}</li>
-                                    <li>実験連結: ${r.analysis.experiment_link_count > 0 ? 'あり' : 'なし'}</li>
-                                    <li>一貫性: ${r.analysis.prediction_consistency || 'N/A'}</li>
-                                    <li>テキスト長: ${r.analysis.text_length || 0}文字</li>
+                                    <li><strong>関係付け数:</strong> ${r.analysis.linking_count || 0}</li>
+                                    <li><strong>実験連結:</strong> ${r.analysis.experiment_link_count > 0 ? 'あり' : 'なし'}</li>
+                                    <li><strong>一貫性:</strong> ${r.analysis.prediction_consistency || 'N/A'}</li>
+                                    <li><strong>テキスト長:</strong> ${r.analysis.text_length || 0}文字 / ${r.detailed.word_count}語 / ${r.detailed.sentence_count}文</li>
+                                    ${r.detailed.linking_keywords.length > 0 ? `<li><strong>関係付けキーワード:</strong> ${r.detailed.linking_keywords.map(k => k[0]).join(', ')}</li>` : ''}
+                                    ${r.detailed.experiment_keywords.length > 0 ? `<li><strong>実験キーワード:</strong> ${r.detailed.experiment_keywords.map(k => k[0]).join(', ')}</li>` : ''}
                                 </ul>
                             </div>
                         `).join('')}

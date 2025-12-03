@@ -19,7 +19,7 @@ import tempfile
 from pathlib import Path
 from functools import lru_cache, wraps
 from werkzeug.utils import secure_filename
-from tools.analysis import analyze_conversation_and_note, analyze_conversation_only
+from tools.analysis import analyze_conversation_and_note, analyze_conversation_only, analyze_prediction_and_reflection_detailed
 
 # Optional analysis libraries (may not be available in all environments)
 try:
@@ -3181,11 +3181,19 @@ def teacher_analysis():
                     student_data['reflection_text'],
                     student_data['unit']
                 )
+                
+                # 詳細分析（埋め込みと詳細メトリクス）
+                detailed_analysis = analyze_prediction_and_reflection_detailed(
+                    student_data['prediction_text'],
+                    student_data['reflection_text']
+                )
+                
                 analysis_results[key] = {
                     'class_num': student_data['class_num'],
                     'seat_num': student_data['seat_num'],
                     'unit': student_data['unit'],
                     'analysis': analysis,
+                    'detailed_analysis': detailed_analysis,
                     'conversation_count': len(student_data['conversation']),
                     'has_prediction': bool(student_data['prediction_text']),
                     'has_reflection': bool(student_data['reflection_text'])
