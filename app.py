@@ -982,6 +982,7 @@ def call_openai_with_retry(prompt, max_retries=3, delay=2, unit=None, stage=None
 # 学習単元のデータ
 UNITS = [
     "金属のあたたまり方",
+    "金属の温度と体積",
     "水のあたたまり方",
     "空気の温度と体積",
     "水を冷やし続けた時の温度と様子"
@@ -1856,15 +1857,12 @@ def summary():
     # 文字数による判定はやめ、意味的に有意な発言かを判定する
     exchange_count = len(user_messages)
     
-    # 非常に緩い判定：2回以上のやりとりがあれば無条件でOK
-    # 1回のみの場合も、少しでも内容があればOK
+    # 最低2回のやり取りが必須
     if exchange_count < 2:
-        # 1回のみの場合、内容が極端に空でなければOK
-        if len(user_content.strip()) < 2:
-            return jsonify({
-                'error': 'あなたの考えが伝わりきっていないようです。どういうわけでそう思ったの？何か見たことや経験があれば教えてね。',
-                'is_insufficient': True
-            }), 400
+        return jsonify({
+            'error': 'もっと話し合ってから、まとめましょう。あなたの考えや経験をもっと聞かせてください。',
+            'is_insufficient': True
+        }), 400
     
     # 単元のプロンプトを読み込み（予想段階の指示を必ず参照）
     unit_prompt = load_unit_prompt(unit, stage='prediction')
@@ -1872,6 +1870,7 @@ def summary():
     summary_instruction = (
         "以下の会話内容のみをもとに、児童の話した言葉や順序を活かして予想をまとめてください。"
         "児童が自分のノートにそのまま写せる、短い1〜2文にしてください。"
+        "【絶対ルール】児童が言った言葉だけを使ってください。言い換え・言い足しは絶対にしないでください。"
         "「〜と思う。なぜなら〜。」の形で、むずかしい言い回しや第三者目線（例:「児童は〜」）は使わないでください。"
         "理由は児童が話した経験や具体的な様子のみを書き、結論を言い換えただけの理由（例:「体積が大きくなるのは体積がふくらむから」）は書かないでください。"
         "会話に含まれていない内容や新しい事実は追加しないでください。"
@@ -2467,22 +2466,27 @@ def final_summary():
     # 文字数による判定は廃止し、意味的に有意かで判定する
     exchange_count = len(user_messages)
     
-    # 非常に緩い判定：2回以上のやりとりがあれば無条件でOK
-    # 1回のみの場合も、少しでも内容があればOK
+    # 最低2回のやり取りが必須
     if exchange_count < 2:
-        # 1回のみの場合、内容が極端に空でなければOK
-        if len(user_content.strip()) < 2:
-            return jsonify({
-                'error': 'あなたの考えが伝わりきっていないようです。どんな結果になった？予想と同じだった？ちがった？',
-                'is_insufficient': True
-            }), 400
+        return jsonify({
+            'error': 'もっと話し合ってから、まとめましょう。あなたの考えや経験をもっと聞かせてください。',
+            'is_insufficient': True
+        }), 400
     
     # 単元のプロンプトを読み込み（考察段階用）
     unit_prompt = load_unit_prompt(unit, stage='reflection')
     
+    # 考察のまとめ指示
+    reflection_summary_instruction = (
+        "以下の会話内容のみをもとに、児童の話した言葉や順序を活かして考察をまとめてください。"
+        "児童が自分のノートにそのまま写せる、短い1〜2文にしてください。"
+        "【絶対ルール】児童が言った言葉だけを使ってください。言い換え・言い足しは絶対にしないでください。"
+        "児童の気づきや学習の進展を重視してください。会話に含まれていない内容や新しい事実は追加しないでください。"
+    )
+    
     # メッセージフォーマットで構築
     messages = [
-        {"role": "system", "content": unit_prompt + "\n\n【重要】以下の会話内容のみをもとに、児童の話した言葉や考えを活かして、考察をまとめてください。会話に含まれていない内容は追加しないでください。"}
+        {"role": "system", "content": unit_prompt + "\n\n【重要】" + reflection_summary_instruction}
     ]
     
     # 対話履歴をメッセージフォーマットで追加

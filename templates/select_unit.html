@@ -20,6 +20,13 @@
             <div class="col-lg-10">
                 <div class="row g-4">
                     {% for unit in units %}
+                    {% if unit_progress and unit in unit_progress %}
+                        {% set progress = unit_progress[unit] %}
+                        <!-- アクセス不可な単元は完全に表示しない -->
+                        {% if not progress.can_access %}
+                            {% continue %}
+                        {% endif %}
+                    {% endif %}
                     <div class="col-lg-4 col-md-6">
                         <div class="unit-card-wrapper">
                             <div class="unit-card">
@@ -40,14 +47,6 @@
                                 
                                 {% if unit_progress and unit in unit_progress %}
                                     {% set progress = unit_progress[unit] %}
-                                    
-                                    <!-- アクセス制限警告 -->
-                                    {% if progress.is_restricted and not progress.can_access %}
-                                    <div class="alert alert-warning alert-sm mb-2" style="font-size: 0.85rem;">
-                                        <i class="fas fa-lock me-1"></i>
-                                        {{ progress.restricted_to_class }}組のみ利用可能です
-                                    </div>
-                                    {% endif %}
                                     
                                     {% if progress.needs_resumption %}
                                         <div class="progress-indicator">
@@ -124,55 +123,15 @@ const classRestrictedUnits = {
 
 // 進行状況に基づいてボタンを有効/無効化
 function updateButtons() {
-    // 予想ボタンの有効/無効
-    document.querySelectorAll('.unit-prediction-btn').forEach((btn) => {
-        const unit = btn.getAttribute('data-unit');
-        const progress = unitProgress[unit] || {};
-        
-        // アクセス可能かチェック
-        const canAccess = progress.can_access !== false;
-        
-        if (!canAccess) {
-            btn.disabled = true;
-            btn.title = `${progress.restricted_to_class}組のみ利用可能です`;
-            btn.classList.add('disabled-button');
-        } else {
-            btn.disabled = false;
-            btn.title = '';
-        }
-    });
-    
-    // 考察ボタンの有効/無効
-    document.querySelectorAll('[id^="reflection-btn-"]').forEach((btn) => {
-        const unit = btn.getAttribute('data-unit');
-        const progress = unitProgress[unit] || {};
-        
-        // アクセス可能かチェック
-        const canAccess = progress.can_access !== false;
-        
-        if (!canAccess) {
-            btn.disabled = true;
-            btn.title = `${progress.restricted_to_class}組のみ利用可能です`;
-            btn.classList.add('disabled-button');
-        } else {
-            btn.disabled = false;
-            btn.title = '';
-        }
-    });
+    // アクセス不可な単元はテンプレートレベルで非表示なので、
+    // ここではボタンの初期化処理のみ実行（将来の拡張用）
 }
 
 // ページロード時に初期化
 document.addEventListener('DOMContentLoaded', updateButtons);
 
 function goToPrediction(unit) {
-    // アクセス制限チェック
-    const progress = unitProgress[unit] || {};
-    if (!progress.can_access) {
-        alert(`申し訳ありません。「${unit}」は${progress.restricted_to_class}組のみアクセスが可能です。`);
-        return;
-    }
-    
-    const predictionSummaryCreated = progress && progress.prediction_summary_created;
+    const predictionSummaryCreated = unitProgress[unit] && unitProgress[unit].prediction_summary_created;
     
     // 予想が完了している場合は警告ダイアログ
     if (predictionSummaryCreated) {
@@ -189,15 +148,8 @@ function goToPrediction(unit) {
 }
 
 function goToReflection(unit) {
-    // アクセス制限チェック
-    const progress = unitProgress[unit] || {};
-    if (!progress.can_access) {
-        alert(`申し訳ありません。「${unit}」は${progress.restricted_to_class}組のみアクセスが可能です。`);
-        return;
-    }
-    
-    const reflectionNeedsResumption = progress && progress.reflection_needs_resumption;
-    const reflectionSummaryCreated = progress && progress.reflection_summary_created;
+    const reflectionNeedsResumption = unitProgress[unit] && unitProgress[unit].reflection_needs_resumption;
+    const reflectionSummaryCreated = unitProgress[unit] && unitProgress[unit].reflection_summary_created;
     
     // 考察が完了している場合は警告ダイアログ
     if (reflectionSummaryCreated) {
