@@ -111,6 +111,9 @@ function displayAnalysis(data) {
     // 学生分析結果を集計
     const studentAnalyses = data.student_analyses || {};
     
+    console.log('Student Analyses:', studentAnalyses);
+    console.log('Student count:', Object.keys(studentAnalyses).length);
+    
     if (Object.keys(studentAnalyses).length === 0) {
         document.getElementById('predictionAnalysis').innerHTML = '<p class="no-data">分析データがありません</p>';
         document.getElementById('reflectionAnalysis').innerHTML = '<p class="no-data">分析データがありません</p>';
@@ -124,6 +127,8 @@ function displayAnalysis(data) {
     for (const [key, studentData] of Object.entries(studentAnalyses)) {
         const unit = studentData.unit;
         const analysis = studentData.analysis;
+        
+        console.log(`Processing ${key}:`, analysis);
         
         if (!predictionsByUnit[unit]) {
             predictionsByUnit[unit] = [];
@@ -150,6 +155,9 @@ function displayAnalysis(data) {
             });
         }
     }
+
+    console.log('Predictions by unit:', predictionsByUnit);
+    console.log('Reflections by unit:', reflectionsByUnit);
 
     // 表示
     displayPredictionAnalysis(predictionsByUnit);
