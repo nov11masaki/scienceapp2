@@ -1240,6 +1240,21 @@ def get_available_log_dates():
     
     return dates_list
 
+def load_all_learning_logs():
+    """全期間の学習ログを読み込み"""
+    all_logs = []
+    dates = get_available_log_dates()
+    
+    for date in dates:
+        try:
+            logs = load_learning_logs(date)
+            all_logs.extend(logs)
+        except Exception as e:
+            print(f"[LOAD_ALL] Error loading logs for {date}: {e}")
+    
+    print(f"[LOAD_ALL] Loaded total {len(all_logs)} logs from {len(dates)} dates")
+    return all_logs
+
 # エラーログ管理機能
 def save_error_log(student_number, class_number, error_message, error_type, stage, unit, additional_info=None):
     """児童のエラーをログに記録
@@ -3094,23 +3109,22 @@ def api_students_by_class():
 
 # ===== 分析機能 =====
 
-@app.route('/teacher/analysis_dashboard')
-def analysis_dashboard():
-    """教員用分析ダッシュボード"""
-    return render_template('teacher/analysis_dashboard.html', units=UNITS)
-
-
 @app.route('/teacher/analysis')
 @require_teacher_auth
 def teacher_analysis():
-    """教員用分析ダッシュボード"""
+    """教員用分析ダッシュボード（全期間対応）"""
     unit = request.args.get('unit', '')
-    date = request.args.get('date', datetime.now().strftime('%Y%m%d'))
+    # dateパラメータがない場合は全期間を対象
+    date = request.args.get('date', None)
     
     try:
-        # ログを読み込み
-        print(f"[ANALYSIS] Loading logs for date={date}, unit={unit}")
-        logs = load_learning_logs(date)
+        # ログを読み込み（全期間または指定日付）
+        if date:
+            print(f"[ANALYSIS] Loading logs for date={date}, unit={unit}")
+            logs = load_learning_logs(date)
+        else:
+            print(f"[ANALYSIS] Loading all logs for unit={unit}")
+            logs = load_all_learning_logs()
         print(f"[ANALYSIS] Loaded {len(logs)} logs")
         
         if unit:
@@ -3182,16 +3196,17 @@ def teacher_analysis():
         prediction_chats = len([l for l in logs if l.get('log_type') == 'prediction_chat'])
         reflection_chats = len([l for l in logs if l.get('log_type') == 'reflection_chat'])
         
-        return jsonify({
-            'success': True,
-            'date': date,
-            'unit': unit,
-            'total_logs': len(logs),
-            'prediction_chats': prediction_chats,
-            'reflection_chats': reflection_chats,
-            'student_analyses': analysis_results,
-            'log_count': len(logs)
-        })
+        return render_template('teacher/analysis_result.html', 
+            units=UNITS,
+            analysis_data=json.dumps({
+                'success': True,
+                'unit': unit,
+                'total_logs': len(logs),
+                'prediction_chats': prediction_chats,
+                'reflection_chats': reflection_chats,
+                'student_analyses': analysis_results
+            })
+        )
     except Exception as e:
         print(f"[ANALYSIS] Fatal error: {e}")
         import traceback
