@@ -85,7 +85,7 @@
 // 初期化
 document.addEventListener('DOMContentLoaded', function() {
     // サーバーから渡されたデータを使用
-    const analysisData = JSON.parse('{{ analysis_data | tojson | safe }}');
+    const analysisData = {{ analysis_data | tojson | raw }};
     
     if (analysisData && analysisData.success) {
         displayAnalysis(analysisData);

@@ -3198,14 +3198,14 @@ def teacher_analysis():
         
         return render_template('teacher/analysis_result.html', 
             units=UNITS,
-            analysis_data=json.dumps({
+            analysis_data={
                 'success': True,
                 'unit': unit,
                 'total_logs': len(logs),
                 'prediction_chats': prediction_chats,
                 'reflection_chats': reflection_chats,
                 'student_analyses': analysis_results
-            })
+            }
         )
     except Exception as e:
         print(f"[ANALYSIS] Fatal error: {e}")
