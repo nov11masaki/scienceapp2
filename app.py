@@ -1578,6 +1578,11 @@ def select_unit():
     
     # 各単元の進行状況をチェック
     unit_progress = {}
+    # 1組限定単元を定義
+    class_restricted_units = {
+        "金属の温度と体積": "1"  # 1組のみアクセス可能
+    }
+    
     for unit in UNITS:
         progress = get_student_progress(class_number, student_number, unit)
         needs_resumption = check_resumption_needed(class_number, student_number, unit)
@@ -1591,6 +1596,10 @@ def select_unit():
         reflection_summary_created = stage_progress.get('reflection', {}).get('summary_created', False)
         reflection_needs_resumption = reflection_started and stage_progress.get('reflection', {}).get('conversation_count', 0) > 0 and not reflection_summary_created
         
+        # 1組限定単元のアクセス制限チェック
+        is_restricted = unit in class_restricted_units
+        can_access = not is_restricted or (is_restricted and str(class_number) == str(class_restricted_units[unit]))
+        
         unit_progress[unit] = {
             'current_stage': progress['current_stage'],
             'needs_resumption': needs_resumption,
@@ -1602,10 +1611,14 @@ def select_unit():
             'experiment_started': experiment_started,
             'reflection_started': reflection_started,
             'reflection_summary_created': reflection_summary_created,
-            'reflection_needs_resumption': reflection_needs_resumption
+            'reflection_needs_resumption': reflection_needs_resumption,
+            # アクセス制限情報
+            'is_restricted': is_restricted,
+            'can_access': can_access,
+            'restricted_to_class': class_restricted_units.get(unit) if is_restricted else None
         }
     
-    return render_template('select_unit.html', units=UNITS, unit_progress=unit_progress)
+    return render_template('select_unit.html', units=UNITS, unit_progress=unit_progress, class_restricted_units=class_restricted_units)
 
 @app.route('/prediction')
 def prediction():
@@ -1613,6 +1626,16 @@ def prediction():
     class_number = normalize_class_value(class_number) or normalize_class_value(session.get('class_number')) or '1'
     student_number = request.args.get('number', session.get('student_number', '1'))
     unit = request.args.get('unit')
+    
+    # 1組限定単元のアクセス制限チェック
+    class_restricted_units = {
+        "金属の温度と体積": "1"  # 1組のみアクセス可能
+    }
+    if unit in class_restricted_units:
+        allowed_class = class_restricted_units[unit]
+        if str(class_number) != str(allowed_class):
+            flash(f'申し訳ありません。「{unit}」は{allowed_class}組のみアクセスが可能です。', 'danger')
+            return redirect(url_for('select_unit', class_number=class_number, number=student_number))
     
     # 異なる単元に移動した場合、セッションをクリア
     current_unit = session.get('unit')
@@ -2211,6 +2234,17 @@ def reflection():
     unit = request.args.get('unit', session.get('unit'))
     class_number = normalize_class_value(session.get('class_number', '1')) or '1'
     student_number = session.get('student_number')
+    
+    # 1組限定単元のアクセス制限チェック
+    class_restricted_units = {
+        "金属の温度と体積": "1"  # 1組のみアクセス可能
+    }
+    if unit in class_restricted_units:
+        allowed_class = class_restricted_units[unit]
+        if str(class_number) != str(allowed_class):
+            flash(f'申し訳ありません。「{unit}」は{allowed_class}組のみアクセスが可能です。', 'danger')
+            return redirect(url_for('select_unit', class_number=class_number, number=student_number))
+    
     session['class_number'] = class_number
     prediction_summary = session.get('prediction_summary')
     

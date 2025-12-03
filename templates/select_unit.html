@@ -40,6 +40,15 @@
                                 
                                 {% if unit_progress and unit in unit_progress %}
                                     {% set progress = unit_progress[unit] %}
+                                    
+                                    <!-- アクセス制限警告 -->
+                                    {% if progress.is_restricted and not progress.can_access %}
+                                    <div class="alert alert-warning alert-sm mb-2" style="font-size: 0.85rem;">
+                                        <i class="fas fa-lock me-1"></i>
+                                        {{ progress.restricted_to_class }}組のみ利用可能です
+                                    </div>
+                                    {% endif %}
+                                    
                                     {% if progress.needs_resumption %}
                                         <div class="progress-indicator">
                                             <span class="badge bg-warning">
@@ -108,50 +117,46 @@ document.getElementById('selectedNumber').textContent = studentNumber;
 const unitProgressElement = document.getElementById('unit-progress-data');
 const unitProgress = unitProgressElement ? JSON.parse(unitProgressElement.textContent) : {};
 
-// 5組かどうかをグローバルに判定
-const isClass5 = classNumber === '5';
+// 1組限定単元を定義
+const classRestrictedUnits = {
+    "金属の温度と体積": "1"
+};
 
 // 進行状況に基づいてボタンを有効/無効化
 function updateButtons() {
-    
     // 予想ボタンの有効/無効
     document.querySelectorAll('.unit-prediction-btn').forEach((btn) => {
         const unit = btn.getAttribute('data-unit');
+        const progress = unitProgress[unit] || {};
         
-        if (isClass5) {
-            // 5組は全員すべてのユニットを利用可能
+        // アクセス可能かチェック
+        const canAccess = progress.can_access !== false;
+        
+        if (!canAccess) {
+            btn.disabled = true;
+            btn.title = `${progress.restricted_to_class}組のみ利用可能です`;
+            btn.classList.add('disabled-button');
+        } else {
             btn.disabled = false;
             btn.title = '';
-        } else {
-            // 5組以外は「空気の温度と体積」のみ有効
-            if (unit === '空気の温度と体積') {
-                btn.disabled = false;
-                btn.title = '';
-            } else {
-                btn.disabled = true;
-                btn.title = '現在このユニットは利用できません';
-            }
         }
     });
     
     // 考察ボタンの有効/無効
     document.querySelectorAll('[id^="reflection-btn-"]').forEach((btn) => {
         const unit = btn.getAttribute('data-unit');
-        const progress = unitProgress[unit];
+        const progress = unitProgress[unit] || {};
         
-        if (isClass5) {
-            // 5組は考察可能（予想完了不要）
+        // アクセス可能かチェック
+        const canAccess = progress.can_access !== false;
+        
+        if (!canAccess) {
+            btn.disabled = true;
+            btn.title = `${progress.restricted_to_class}組のみ利用可能です`;
+            btn.classList.add('disabled-button');
+        } else {
             btn.disabled = false;
             btn.title = '';
-        } else {
-            // 5組以外は「空気の温度と体積」のみ
-            if (unit === '空気の温度と体積') {
-                btn.disabled = false;
-                btn.title = '';
-            } else {
-                btn.disabled = true;
-                btn.title = '現在このユニットは利用できません';
-            }
         }
     });
 }
@@ -160,14 +165,13 @@ function updateButtons() {
 document.addEventListener('DOMContentLoaded', updateButtons);
 
 function goToPrediction(unit) {
-    // ボタンが無効な場合は処理しない
-    if (!isClass5 && unit !== '空気の温度と体積') {
-        alert('現在このユニットは利用できません');
+    // アクセス制限チェック
+    const progress = unitProgress[unit] || {};
+    if (!progress.can_access) {
+        alert(`申し訳ありません。「${unit}」は${progress.restricted_to_class}組のみアクセスが可能です。`);
         return;
     }
     
-    const progress = unitProgress[unit];
-    const needsResumption = progress && progress.needs_resumption;
     const predictionSummaryCreated = progress && progress.prediction_summary_created;
     
     // 予想が完了している場合は警告ダイアログ
@@ -185,13 +189,13 @@ function goToPrediction(unit) {
 }
 
 function goToReflection(unit) {
-    // ボタンが無効な場合は処理しない
-    if (!isClass5 && unit !== '空気の温度と体積') {
-        alert('現在このユニットは利用できません');
+    // アクセス制限チェック
+    const progress = unitProgress[unit] || {};
+    if (!progress.can_access) {
+        alert(`申し訳ありません。「${unit}」は${progress.restricted_to_class}組のみアクセスが可能です。`);
         return;
     }
     
-    const progress = unitProgress[unit];
     const reflectionNeedsResumption = progress && progress.reflection_needs_resumption;
     const reflectionSummaryCreated = progress && progress.reflection_summary_created;
     
