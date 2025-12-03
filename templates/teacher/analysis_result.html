@@ -33,12 +33,12 @@
                             <div class="row mb-4">
                                 <div class="col-md-6">
                                     <h6>🎯 総合スコア</h6>
-                                    <div class="progress" style="height: 25px;">
+                                    <div class="progress analysis-progress">
                                         {% set score_percent = (analysis.prediction_and_reflection.overall_score / analysis.prediction_and_reflection.max_score * 100) | int %}
                                         <div class="progress-bar {% if score_percent >= 70 %}bg-success{% elif score_percent >= 50 %}bg-warning{% else %}bg-danger{% endif %}" 
                                              role="progressbar" 
-                                             style="width: {{ score_percent }}%;" 
-                                             aria-valuenow="{{ score_percent }}" 
+                                             title="スコア: {{ analysis.prediction_and_reflection.overall_score }}/{{ analysis.prediction_and_reflection.max_score }}"
+                                             data-percent="{{ score_percent }}"
                                              aria-valuemin="0" 
                                              aria-valuemax="100">
                                             {{ analysis.prediction_and_reflection.overall_score }}/{{ analysis.prediction_and_reflection.max_score }}
@@ -57,7 +57,7 @@
                                         <div class="card-body">
                                             {% if analysis.prediction_and_reflection.prediction.has_text %}
                                                 <p class="small text-muted">入力されたテキスト:</p>
-                                                <p class="card-text" style="font-size: 0.95rem; line-height: 1.6;">
+                                                <p class="card-text analysis-text-excerpt">
                                                     {{ analysis.prediction_and_reflection.prediction.details.excerpt }}{% if analysis.prediction_and_reflection.prediction.text_length > 100 %}...{% endif %}
                                                 </p>
                                                 <hr>
@@ -92,7 +92,7 @@
                                         <div class="card-body">
                                             {% if analysis.prediction_and_reflection.reflection.has_text %}
                                                 <p class="small text-muted">入力されたテキスト:</p>
-                                                <p class="card-text" style="font-size: 0.95rem; line-height: 1.6;">
+                                                <p class="card-text analysis-text-excerpt">
                                                     {{ analysis.prediction_and_reflection.reflection.details.excerpt }}{% if analysis.prediction_and_reflection.reflection.text_length > 100 %}...{% endif %}
                                                 </p>
                                                 <hr>
@@ -250,15 +250,15 @@
                         <div class="card-body">
                             <div class="alert alert-light">
                                 <h6>💬 会話のタイムライン</h6>
-                                <div style="max-height: 400px; overflow-y: auto;">
+                                <div class="analysis-conversation-log">
                                     {% for msg in conversation %}
-                                        <div class="mb-3 pb-2 border-bottom" style="font-size: 0.95rem;">
+                                        <div class="analysis-log-message">
                                             {% if msg.role == 'user' %}
                                                 <span class="badge bg-primary">児童</span>
                                             {% else %}
                                                 <span class="badge bg-success">AI</span>
                                             {% endif %}
-                                            <p class="mb-0 mt-2" style="line-height: 1.6;">
+                                            <p class="mb-0 mt-2 analysis-message-content">
                                                 {{ msg.content }}
                                             </p>
                                         </div>
@@ -283,18 +283,14 @@
     </div>
 </div>
 
-<style>
-.alert-sm {
-    padding: 0.25rem 0.75rem !important;
-    margin: 0 !important;
-}
-
-.card {
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-}
-
-.badge {
-    font-weight: 500;
-}
-</style>
+<script>
+// プログレスバーの幅をJavaScriptで設定
+document.addEventListener('DOMContentLoaded', function() {
+    const progressBar = document.querySelector('.progress-bar');
+    if (progressBar && progressBar.dataset.percent) {
+        progressBar.style.width = progressBar.dataset.percent + '%';
+        progressBar.setAttribute('aria-valuenow', progressBar.dataset.percent);
+    }
+});
+</script>
 {% endblock %}
