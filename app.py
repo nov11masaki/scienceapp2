@@ -3144,6 +3144,87 @@ def teacher_analysis():
         }), 500
 
 
+@app.route('/teacher/analysis_form')
+@require_teacher_auth
+def teacher_analysis_form():
+    """学習分析入力フォームを表示"""
+    return render_template('teacher/analysis_input.html')
+
+
+@app.route('/teacher/analyze_student', methods=['POST'])
+@require_teacher_auth
+def analyze_student():
+    """児童の分析フォーム（予想+考察入力）から分析を実行"""
+    try:
+        class_num = request.form.get('class_num')
+        seat_num = request.form.get('seat_num')
+        unit = request.form.get('unit', '')
+        prediction_text = request.form.get('prediction', '').strip()
+        reflection_text = request.form.get('reflection', '').strip()
+        
+        if not all([class_num, seat_num, unit, prediction_text, reflection_text]):
+            return jsonify({'success': False, 'error': '全ての項目を入力してください'}), 400
+        
+        # ノート内容を統合（予想→考察の順）
+        combined_note = f"【予想】\n{prediction_text}\n\n【考察】\n{reflection_text}"
+        
+        # GCS/ローカルから会話ログを取得
+        dates = get_available_log_dates()
+        logs = []
+        for d in dates:
+            logs.extend(load_learning_logs(d))
+        
+        # フィルタ: class, seat, unit にマッチするログを取得
+        class_num_int = normalize_class_value_int(class_num)
+        filtered = []
+        for log in logs:
+            if class_num_int is not None and log.get('class_num') != class_num_int:
+                continue
+            if str(log.get('seat_num')) != str(seat_num):
+                continue
+            if log.get('unit') != unit:
+                continue
+            filtered.append(log)
+        
+        # 会話履歴を時系列で組み立て
+        conversation = []
+        sorted_logs = sorted(filtered, key=lambda x: x.get('timestamp', ''))
+        for log in sorted_logs:
+            lt = log.get('log_type')
+            data = log.get('data', {})
+            if lt in ('prediction_chat', 'reflection_chat'):
+                um = data.get('user_message', '')
+                ar = data.get('ai_response', '')
+                if um:
+                    conversation.append({'role': 'user', 'content': um})
+                if ar:
+                    conversation.append({'role': 'assistant', 'content': ar})
+        
+        # 分析実行（会話ログ + 教員が入力した記述）
+        analysis = analyze_conversation_and_note(conversation, combined_note, unit=unit)
+        
+        return render_template(
+            'teacher/analysis_result.html',
+            class_num=class_num,
+            seat_num=seat_num,
+            unit=unit,
+            prediction_text=prediction_text,
+            reflection_text=reflection_text,
+            conversation=conversation,
+            analysis=analysis,
+            raw_log_count=len(filtered)
+        )
+        
+    except Exception as e:
+        import traceback
+        print(f"分析エラー: {e}")
+        print(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @app.route('/teacher/analysis_student')
 @require_teacher_auth
 def teacher_analysis_student():
