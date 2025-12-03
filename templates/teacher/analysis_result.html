@@ -3,7 +3,7 @@
 {% block title %}予想・考察分析{% endblock %}
 
 {% block content %}
-<div class="analysis-dashboard-page">
+<div class="analysis-dashboard-page" data-analysis='{{ analysis_data | tojson | raw }}'>
     <!-- ヘッダー -->
     <header class="analysis-header">
         <div class="header-container">
@@ -84,8 +84,9 @@
 <script>
 // 初期化
 document.addEventListener('DOMContentLoaded', function() {
-    // サーバーから渡されたデータを使用
-    const analysisData = {{ analysis_data | tojson | raw }};
+    // HTML属性からデータを取得
+    const pageElement = document.querySelector('.analysis-dashboard-page');
+    const analysisData = JSON.parse(pageElement.getAttribute('data-analysis'));
     
     if (analysisData && analysisData.success) {
         displayAnalysis(analysisData);
