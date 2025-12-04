@@ -1579,9 +1579,9 @@ def select_unit():
     
     # 各単元の進行状況をチェック
     unit_progress = {}
-    # 1組限定単元を定義
+    # 1組限定単元を定義（5組は全て許可）
     class_restricted_units = {
-        "金属の温度と体積": "1"  # 1組のみアクセス可能
+        "金属の温度と体積": "1"  # 1組のみアクセス可能（5組は全て許可）
     }
     
     for unit in UNITS:
@@ -1597,9 +1597,9 @@ def select_unit():
         reflection_summary_created = stage_progress.get('reflection', {}).get('summary_created', False)
         reflection_needs_resumption = reflection_started and stage_progress.get('reflection', {}).get('conversation_count', 0) > 0 and not reflection_summary_created
         
-        # 1組限定単元のアクセス制限チェック
+        # アクセス制限チェック: 1組限定単元は1組または5組のみアクセス可能
         is_restricted = unit in class_restricted_units
-        can_access = not is_restricted or (is_restricted and str(class_number) == str(class_restricted_units[unit]))
+        can_access = not is_restricted or (is_restricted and (str(class_number) == str(class_restricted_units[unit]) or str(class_number) == "5"))
         
         unit_progress[unit] = {
             'current_stage': progress['current_stage'],
@@ -1630,12 +1630,13 @@ def prediction():
     
     # 1組限定単元のアクセス制限チェック
     class_restricted_units = {
-        "金属の温度と体積": "1"  # 1組のみアクセス可能
+        "金属の温度と体積": "1"  # 1組のみアクセス可能（5組は全て許可）
     }
     if unit in class_restricted_units:
         allowed_class = class_restricted_units[unit]
-        if str(class_number) != str(allowed_class):
-            flash(f'申し訳ありません。「{unit}」は{allowed_class}組のみアクセスが可能です。', 'danger')
+        # 1組、または5組のみアクセス許可
+        if str(class_number) != str(allowed_class) and str(class_number) != "5":
+            flash(f'申し訳ありません。「{unit}」は{allowed_class}組と5組のみアクセスが可能です。', 'danger')
             return redirect(url_for('select_unit', class_number=class_number, number=student_number))
     
     # 異なる単元に移動した場合、セッションをクリア
@@ -2236,12 +2237,13 @@ def reflection():
     
     # 1組限定単元のアクセス制限チェック
     class_restricted_units = {
-        "金属の温度と体積": "1"  # 1組のみアクセス可能
+        "金属の温度と体積": "1"  # 1組のみアクセス可能（5組は全て許可）
     }
     if unit in class_restricted_units:
         allowed_class = class_restricted_units[unit]
-        if str(class_number) != str(allowed_class):
-            flash(f'申し訳ありません。「{unit}」は{allowed_class}組のみアクセスが可能です。', 'danger')
+        # 1組、または5組のみアクセス許可
+        if str(class_number) != str(allowed_class) and str(class_number) != "5":
+            flash(f'申し訳ありません。「{unit}」は{allowed_class}組と5組のみアクセスが可能です。', 'danger')
             return redirect(url_for('select_unit', class_number=class_number, number=student_number))
     
     session['class_number'] = class_number
