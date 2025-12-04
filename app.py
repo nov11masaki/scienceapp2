@@ -2663,35 +2663,7 @@ def student_detail():
                          teacher_id=session.get('teacher_id', 'teacher'))
 
 
-# ===== 教師用ノート写真管理エンドポイント =====
 
-@app.route('/api/teacher/students-by-class')
-@require_teacher_auth
-def api_students_by_class():
-    """クラスごとの児童情報をJSON形式で返す"""
-    students_by_class = {}
-    
-    # learning_progress.jsonから児童情報を取得
-    if os.path.exists(LEARNING_PROGRESS_FILE):
-        try:
-            with open(LEARNING_PROGRESS_FILE, 'r', encoding='utf-8') as f:
-                progress_data = json.load(f)
-            
-            for class_num in ['1', '2', '3', '4', '5', '6']:
-                students_by_class[class_num] = []
-                
-                if f'class_{class_num}' in progress_data:
-                    class_data = progress_data[f'class_{class_num}']
-                    for student_id in sorted(class_data.keys(), key=lambda x: int(x) if x.isdigit() else 0):
-                        student_info = class_data[student_id]
-                        students_by_class[class_num].append({
-                            'number': student_id,
-                            'name': student_info.get('name', f'学生{student_id}')
-                        })
-        except Exception as e:
-            print(f"Error loading students: {e}")
-    
-    return jsonify(students_by_class)
 
 
 # ===== 分析機能 =====
@@ -2877,7 +2849,7 @@ def generate_ai_insights(prediction_messages, reflection_messages, unit):
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "あなたは小学校理科の先生です。児童の学習ログから対話パターンを分析し、プロンプト改善を提案します。小学校理科で扱う語彙だけを使い、専門用語（分子、膨張、収縮、圧力など高度な言葉）は使わず、日常語で簡潔にまとめてください。"},
+                {"role": "system", "content": "あなたは小学校の理科教員です。児童の学習ログから対話パターンを分析し、プロンプト改善を提案します。"},
                 {"role": "user", "content": analysis_prompt}
             ],
             max_tokens=600,
