@@ -74,8 +74,19 @@ if USE_GCS:
         storage_client = storage.Client(project=gcp_project)
         bucket_name = os.getenv('GCS_BUCKET_NAME', 'science-buddy-logs')
         bucket = storage_client.bucket(bucket_name)
-        # バケット接続確認
-        print(f"[INIT] GCS bucket '{bucket_name}' initialized successfully")
+        
+        # バケット接続確認（タイムアウト対応）
+        try:
+            if bucket.exists():
+                print(f"[INIT] GCS bucket '{bucket_name}' initialized successfully")
+            else:
+                print(f"[INIT] GCS bucket '{bucket_name}' does not exist, using local storage")
+                USE_GCS = False
+                bucket = None
+        except Exception as e:
+            print(f"[INIT] GCS bucket check failed: {e}, falling back to local storage")
+            USE_GCS = False
+            bucket = None
     except Exception as e:
         print(f"[INIT] Warning: GCS initialization failed: {e}")
         USE_GCS = False
@@ -3130,7 +3141,20 @@ def teacher_analysis():
             if USE_GCS and bucket:
                 try:
                     print(f"[ANALYSIS] Fetching logs from GCS for period {start_date} to {end_date}")
-                    blobs = bucket.list_blobs(prefix='logs/learning_log_')
+                    # タイムアウト対応（5秒）
+                    import signal
+                    def timeout_handler(signum, frame):
+                        raise TimeoutError("GCS request timeout")
+                    
+                    signal.signal(signal.SIGALRM, timeout_handler)
+                    signal.alarm(5)  # 5秒でタイムアウト
+                    try:
+                        blobs = list(bucket.list_blobs(prefix='logs/learning_log_', max_results=100))
+                        signal.alarm(0)  # タイマーキャンセル
+                    except Exception:
+                        signal.alarm(0)  # タイマーキャンセル
+                        raise
+                    
                     for blob in blobs:
                         try:
                             # ファイル名から日付を抽出 (learning_log_YYYYMMDD.json)
@@ -3146,6 +3170,7 @@ def teacher_analysis():
                             print(f"[ANALYSIS] Warning: Could not read {blob.name}: {e}")
                 except Exception as gcs_err:
                     print(f"[ANALYSIS] GCS fetch failed: {gcs_err}, falling back to local logs")
+                    logs = []  # GCS失敗時はリセット
             
             # GCS失敗またはGCS無効時：ローカルから読み込み
             if not logs:
@@ -3174,7 +3199,20 @@ def teacher_analysis():
             if USE_GCS and bucket:
                 try:
                     print(f"[ANALYSIS] Fetching all logs from GCS")
-                    blobs = bucket.list_blobs(prefix='logs/learning_log_')
+                    # タイムアウト対応（5秒）
+                    import signal
+                    def timeout_handler(signum, frame):
+                        raise TimeoutError("GCS request timeout")
+                    
+                    signal.signal(signal.SIGALRM, timeout_handler)
+                    signal.alarm(5)  # 5秒でタイムアウト
+                    try:
+                        blobs = list(bucket.list_blobs(prefix='logs/learning_log_', max_results=100))
+                        signal.alarm(0)  # タイマーキャンセル
+                    except Exception:
+                        signal.alarm(0)  # タイマーキャンセル
+                        raise
+                    
                     for blob in blobs:
                         try:
                             content = blob.download_as_string()
@@ -3185,6 +3223,7 @@ def teacher_analysis():
                             print(f"[ANALYSIS] Warning: Could not read {blob.name}: {e}")
                 except Exception as gcs_err:
                     print(f"[ANALYSIS] GCS fetch failed: {gcs_err}, falling back to local logs")
+                    logs = []  # GCS失敗時はリセット
             
             # GCS失敗またはGCS無効時：ローカルから読み込み
             if not logs:
