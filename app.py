@@ -2230,6 +2230,17 @@ def teacher_logs():
             logs = []
     else:
         logs = load_learning_logs(date)
+
+    # 安全策: logs にネストしたリストが混入していることがあるため、再帰的にフラット化
+    def _flatten(items):
+        for it in items:
+            if isinstance(it, list):
+                yield from _flatten(it)
+            elif isinstance(it, dict):
+                yield it
+
+    if isinstance(logs, list):
+        logs = list(_flatten(logs))
     
     # フィルタリング
     if unit:
