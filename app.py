@@ -1135,15 +1135,16 @@ def load_learning_logs(date=None):
             try:
                 content = blob.download_as_string()
                 logs = json.loads(content.decode('utf-8'))
-                # 正常化: ログ内にリストがネストしている場合はフラット化
+                # 正常化: ネストしたリストを再帰的にフラット化し、辞書のみを残す
+                def _flatten(items):
+                    for it in items:
+                        if isinstance(it, list):
+                            yield from _flatten(it)
+                        elif isinstance(it, dict):
+                            yield it
+
                 if isinstance(logs, list):
-                    normalized = []
-                    for item in logs:
-                        if isinstance(item, list):
-                            normalized.extend(item)
-                        else:
-                            normalized.append(item)
-                    logs = normalized
+                    logs = list(_flatten(logs))
                 log_count = len(logs)
                 print(f"[LOG_LOAD] GCS SUCCESS - loaded {log_count} logs from {date}")
                 return logs
@@ -1164,15 +1165,16 @@ def load_learning_logs(date=None):
     try:
         with open(log_file, 'r', encoding='utf-8') as f:
             logs = json.load(f)
-            # 正常化: ネストされたリストをフラット化
+            # 正常化: ネストしたリストを再帰的にフラット化
+            def _flatten(items):
+                for it in items:
+                    if isinstance(it, list):
+                        yield from _flatten(it)
+                    elif isinstance(it, dict):
+                        yield it
+
             if isinstance(logs, list):
-                normalized = []
-                for item in logs:
-                    if isinstance(item, list):
-                        normalized.extend(item)
-                    else:
-                        normalized.append(item)
-                logs = normalized
+                logs = list(_flatten(logs))
             return logs
     except (json.JSONDecodeError, FileNotFoundError):
         return []
@@ -2672,17 +2674,17 @@ def teacher_analysis():
 
 def analyze_logs_simple(logs):
     """簡易ログ分析（GCSデータ対応、生成AIで傾向分析とプロンプト改善提案）"""
-    # 正常化: もし logs がネストしたリストを含む場合、フラット化して辞書リストにする
+    # 正常化: ネストしたリストを再帰的にフラット化して辞書リストにする
+    def _flatten(items):
+        for it in items:
+            if isinstance(it, list):
+                yield from _flatten(it)
+            elif isinstance(it, dict):
+                yield it
+
     if isinstance(logs, list):
-        normalized = []
-        for item in logs:
-            if isinstance(item, list):
-                normalized.extend([i for i in item if isinstance(i, dict)])
-            elif isinstance(item, dict):
-                normalized.append(item)
-        logs = normalized
+        logs = list(_flatten(logs))
     else:
-        # 想定外の型の場合は空リストにする
         logs = []
     prediction_logs = [log for log in logs if log.get('log_type') == 'prediction_chat']
     reflection_logs = [log for log in logs if log.get('log_type') == 'reflection_chat']
