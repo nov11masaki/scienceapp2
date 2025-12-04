@@ -3126,40 +3126,78 @@ def teacher_analysis():
             end_dt = dt.strptime(end_date, '%Y%m%d')
             
             # 日付範囲内の全てのログファイルを読み込み
-            import glob
-            log_dir = os.path.dirname(os.path.abspath(LEARNING_LOG_FILE)) if hasattr(LEARNING_LOG_FILE, '__iter__') else 'logs'
-            log_files = sorted(glob.glob(f'{log_dir}/learning_log_*.json'))
-            
-            for log_file in log_files:
+            # GCS優先、失敗時はローカルから読み込み
+            if USE_GCS and bucket:
                 try:
-                    # ファイル名から日付を抽出 (learning_log_YYYYMMDD.json)
-                    file_date_str = os.path.basename(log_file).replace('learning_log_', '').replace('.json', '')
-                    if len(file_date_str) == 8 and file_date_str.isdigit():
-                        file_date = dt.strptime(file_date_str, '%Y%m%d')
-                        if start_dt <= file_date <= end_dt:
-                            with open(log_file, 'r', encoding='utf-8') as f:
-                                file_logs = json.load(f)
-                                if isinstance(file_logs, list):
-                                    logs.extend(file_logs)
-                except Exception as e:
-                    print(f"[ANALYSIS] Warning: Could not read {log_file}: {e}")
+                    print(f"[ANALYSIS] Fetching logs from GCS for period {start_date} to {end_date}")
+                    blobs = bucket.list_blobs(prefix='logs/learning_log_')
+                    for blob in blobs:
+                        try:
+                            # ファイル名から日付を抽出 (learning_log_YYYYMMDD.json)
+                            file_date_str = os.path.basename(blob.name).replace('learning_log_', '').replace('.json', '')
+                            if len(file_date_str) == 8 and file_date_str.isdigit():
+                                file_date = dt.strptime(file_date_str, '%Y%m%d')
+                                if start_dt <= file_date <= end_dt:
+                                    content = blob.download_as_string()
+                                    file_logs = json.loads(content.decode('utf-8'))
+                                    if isinstance(file_logs, list):
+                                        logs.extend(file_logs)
+                        except Exception as e:
+                            print(f"[ANALYSIS] Warning: Could not read {blob.name}: {e}")
+                except Exception as gcs_err:
+                    print(f"[ANALYSIS] GCS fetch failed: {gcs_err}, falling back to local logs")
+            
+            # GCS失敗またはGCS無効時：ローカルから読み込み
+            if not logs:
+                import glob
+                log_files = sorted(glob.glob('logs/learning_log_*.json'))
+                for log_file in log_files:
+                    try:
+                        # ファイル名から日付を抽出 (learning_log_YYYYMMDD.json)
+                        file_date_str = os.path.basename(log_file).replace('learning_log_', '').replace('.json', '')
+                        if len(file_date_str) == 8 and file_date_str.isdigit():
+                            file_date = dt.strptime(file_date_str, '%Y%m%d')
+                            if start_dt <= file_date <= end_dt:
+                                with open(log_file, 'r', encoding='utf-8') as f:
+                                    file_logs = json.load(f)
+                                    if isinstance(file_logs, list):
+                                        logs.extend(file_logs)
+                    except Exception as e:
+                        print(f"[ANALYSIS] Warning: Could not read {log_file}: {e}")
             
             analysis_period = f"{start_date} to {end_date}"
         else:
             # 全期間：全てのログファイルを読み込み
             print(f"[ANALYSIS] Loading logs for all periods, unit={unit}")
-            import glob
-            log_dir = os.path.dirname(os.path.abspath(LEARNING_LOG_FILE)) if hasattr(LEARNING_LOG_FILE, '__iter__') else 'logs'
-            log_files = sorted(glob.glob(f'{log_dir}/learning_log_*.json'))
             
-            for log_file in log_files:
+            # GCS優先、失敗時はローカルから読み込み
+            if USE_GCS and bucket:
                 try:
-                    with open(log_file, 'r', encoding='utf-8') as f:
-                        file_logs = json.load(f)
-                        if isinstance(file_logs, list):
-                            logs.extend(file_logs)
-                except Exception as e:
-                    print(f"[ANALYSIS] Warning: Could not read {log_file}: {e}")
+                    print(f"[ANALYSIS] Fetching all logs from GCS")
+                    blobs = bucket.list_blobs(prefix='logs/learning_log_')
+                    for blob in blobs:
+                        try:
+                            content = blob.download_as_string()
+                            file_logs = json.loads(content.decode('utf-8'))
+                            if isinstance(file_logs, list):
+                                logs.extend(file_logs)
+                        except Exception as e:
+                            print(f"[ANALYSIS] Warning: Could not read {blob.name}: {e}")
+                except Exception as gcs_err:
+                    print(f"[ANALYSIS] GCS fetch failed: {gcs_err}, falling back to local logs")
+            
+            # GCS失敗またはGCS無効時：ローカルから読み込み
+            if not logs:
+                import glob
+                log_files = sorted(glob.glob('logs/learning_log_*.json'))
+                for log_file in log_files:
+                    try:
+                        with open(log_file, 'r', encoding='utf-8') as f:
+                            file_logs = json.load(f)
+                            if isinstance(file_logs, list):
+                                logs.extend(file_logs)
+                    except Exception as e:
+                        print(f"[ANALYSIS] Warning: Could not read {log_file}: {e}")
             
             analysis_period = "全期間"
         
