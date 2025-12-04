@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}学生詳細ログ - {{ student_display }}{% endblock %}
+{% block title %}児童詳細ログ - {{ student_display }}{% endblock %}
 
 {% block content %}
 <div class="teacher-student-detail">
@@ -150,7 +150,7 @@
                                 <div class="chat-timestamp">{{ chat.timestamp }}</div>
                                 <div class="chat-content">
                                     <div class="user-message">
-                                        <strong>学生:</strong>
+                                        <strong>児童:</strong>
                                         <p>{{ chat.data.user_message }}</p>
                                     </div>
                                     <div class="ai-message">
@@ -177,7 +177,7 @@
                                 <div class="chat-timestamp">{{ chat.timestamp }}</div>
                                 <div class="chat-content">
                                     <div class="user-message">
-                                        <strong>学生:</strong>
+                                        <strong>児童:</strong>
                                         <p>{{ chat.data.user_message }}</p>
                                     </div>
                                     <div class="ai-message">
@@ -195,7 +195,7 @@
             {% else %}
             <div class="alert alert-info">
                 <i class="fas fa-info-circle me-2"></i>
-                この学生のログが見つかりません。
+                この児童のログが見つかりません。
             </div>
             {% endif %}
         </div>
@@ -425,7 +425,7 @@ function applyFilters() {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('学生詳細ページ読み込み完了');
+    console.log('児童詳細ページ読み込み完了');
     
     // ログがない場合の表示調整
     const logContainer = document.querySelector('.logs-container');
@@ -433,7 +433,7 @@ document.addEventListener('DOMContentLoaded', function() {
         logContainer.innerHTML = `
             <div class="alert alert-info">
                 <i class="fas fa-info-circle me-2"></i>
-                この学生のログが見つかりません。他の日付や単元をお試しください。
+                この児童のログが見つかりません。他の日付や単元をお試しください。
             </div>
         `;
     }

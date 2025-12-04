@@ -58,7 +58,8 @@ load_dotenv()
 LEARNING_PROGRESS_FILE = os.environ.get('LEARNING_PROGRESS_FILE', 'learning_progress.json')
 PROMPTS_DIR = Path('prompts')
 
-# ストレージ設定：GCS（本番環境）またはローカルJSON（開発環境）
+# ストレージ設定：ローカルJSON（デフォルト）またはGCS（本番環境）
+# 開発環境ではローカルJSONを優先し、本番環境でGCSを有効化
 # 本番では FLASK_ENV=production のほか Cloud Run の環境変数 (K_SERVICE) や
 # 明示的なフラグ `USE_GCS=1` によって GCS を有効化できます。
 USE_GCS = (
@@ -66,6 +67,8 @@ USE_GCS = (
     or bool(os.getenv('K_SERVICE'))
     or os.getenv('USE_GCS') == '1'
 ) and bool(os.getenv('GCP_PROJECT_ID'))
+
+bucket = None
 
 if USE_GCS:
     try:
@@ -88,11 +91,11 @@ if USE_GCS:
             USE_GCS = False
             bucket = None
     except Exception as e:
-        print(f"[INIT] Warning: GCS initialization failed: {e}")
+        print(f"[INIT] Warning: GCS initialization failed: {e}, using local storage")
         USE_GCS = False
         bucket = None
 else:
-    bucket = None
+    print(f"[INIT] Local storage mode (USE_GCS={USE_GCS})")
 
 # Firestore optional runtime storage
 USE_FIRESTORE = os.getenv('USE_FIRESTORE', '0').lower() in ('1', 'true', 'yes')
