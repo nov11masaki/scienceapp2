@@ -92,7 +92,7 @@ if USE_GCS:
             # 認証成功 = GCS 接続準備完了と見なす
             # Note: Cloud Resource Manager API が無効なため、バケットメタデータテストはスキップ
             # 実際の読み書きは ADC を使って gsutil 互換の JSON API で実行
-            storage_client = storage.Client(credentials=credentials)
+            storage_client = storage.Client(credentials=credentials, project=gcp_project)
             bucket = storage_client.bucket(bucket_name)
             
             print(f"[INIT] GCS bucket '{bucket_name}' configured for use (project: {gcp_project})")
