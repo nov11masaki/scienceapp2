@@ -2877,7 +2877,7 @@ def generate_ai_insights(prediction_messages, reflection_messages, unit):
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "あなたは理科教育の専門家です。児童の学習ログから対話パターンを分析し、プロンプト改善を提案します。"},
+                {"role": "system", "content": "あなたは小学校理科の先生です。児童の学習ログから対話パターンを分析し、プロンプト改善を提案します。小学校理科で扱う語彙だけを使い、専門用語（分子、膨張、収縮、圧力など高度な言葉）は使わず、日常語で簡潔にまとめてください。"},
                 {"role": "user", "content": analysis_prompt}
             ],
             max_tokens=600,
