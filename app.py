@@ -21,7 +21,14 @@ from functools import lru_cache, wraps
 from werkzeug.utils import secure_filename
 
 # 分析モジュールをインポート
-from tools.analysis import analyze_all_conversations, generate_text_analysis, SCIENCE_TERMS, VOCABULARY_MAPPING
+from tools.analysis import (
+    analyze_all_conversations, 
+    generate_text_analysis, 
+    SCIENCE_TERMS, 
+    VOCABULARY_MAPPING,
+    generate_insights,
+    cluster_and_analyze_conversations
+)
 
 # Optional analysis libraries (may not be available in all environments)
 try:
@@ -3263,28 +3270,30 @@ def analyze_predictions_and_reflections(logs):
                 'reflection': analyze_text(reflection_messages, unit)
             }
             
-            # 埋め込み + クラスタリング分析（エラー時はスキップ）
+            # クラスタリング分析（簡易実装で外部ライブラリ不要）
             try:
-                result['embeddings_analysis'][unit] = analyze_with_embeddings(
-                    prediction_messages, 
-                    reflection_messages, 
-                    unit
+                combined_logs = (
+                    [{'user_message': m} for m in prediction_messages] +
+                    [{'user_message': m} for m in reflection_messages]
                 )
-            except Exception as embed_err:
-                print(f"[EMBEDDINGS] Skipping embeddings for {unit}: {embed_err}")
-                result['embeddings_analysis'][unit] = {'clusters': [], 'cluster_count': 0, 'skipped': True}
+                clustering_result = cluster_and_analyze_conversations({unit: combined_logs})
+                result['embeddings_analysis'][unit] = clustering_result.get(unit, {})
+            except Exception as cluster_err:
+                print(f"[CLUSTERING] Skipping clustering for {unit}: {cluster_err}")
+                result['embeddings_analysis'][unit] = {'clusters': [], 'cluster_count': 0, 'error': str(cluster_err)}
             
-            # インサイト生成（エラー時はスキップ）
+            # 有意義なインサイト生成
             try:
-                result['insights'][unit] = generate_insights(
-                    prediction_messages,
-                    reflection_messages,
-                    result['text_analysis'][unit],
-                    unit
-                )
+                all_prediction_messages = prediction_messages
+                all_reflection_messages = reflection_messages
+                
+                result['insights'][unit] = {
+                    'prediction': generate_insights(all_prediction_messages, unit),
+                    'reflection': generate_insights(all_reflection_messages, unit)
+                }
             except Exception as insight_err:
                 print(f"[INSIGHTS] Skipping insights for {unit}: {insight_err}")
-                result['insights'][unit] = []
+                result['insights'][unit] = {'prediction': [], 'reflection': []}
             
             # プロンプト改善提案（エラー時はスキップ）
             try:

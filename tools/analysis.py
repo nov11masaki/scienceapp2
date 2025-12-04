@@ -1,12 +1,14 @@
 """
 児童の予想・考察の分析モジュール
-理科用語の含有率、科学的語彙の獲得率を分析する
+理科用語の含有率、科学的語彙の獲得率、テキストクラスタリングを分析する
 """
 import json
 import re
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
+import math
+from typing import List, Dict, Tuple
 
 # 理科用語辞書（単元ごと）
 SCIENCE_TERMS = {
@@ -279,3 +281,224 @@ def extract_linguistic_patterns(text):
         "uncertainty_expressions": len(re.findall(r"(かもしれない|思う|ような|ぐらい|くらい)", text))
     }
     return patterns
+
+
+def simple_text_embedding(text: str) -> List[float]:
+    """
+    簡易的なテキスト埋め込み（TF-IDF的な単純実装）
+    単語の出現頻度ベクトルを返す
+    """
+    words = extract_nouns_and_verbs(text)
+    word_freq = Counter(words)
+    
+    # 各単語の重みを正規化
+    max_freq = max(word_freq.values()) if word_freq else 1
+    vector = [count / max_freq for count in word_freq.values()]
+    
+    # 固定次元に正規化（最大100次元）
+    target_dim = min(100, len(word_freq))
+    if len(vector) > target_dim:
+        vector = vector[:target_dim]
+    elif len(vector) < target_dim:
+        vector.extend([0.0] * (target_dim - len(vector)))
+    
+    return vector
+
+
+def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
+    """
+    コサイン類似度を計算
+    """
+    if not vec1 or not vec2:
+        return 0.0
+    
+    # ベクトルの長さを揃える
+    max_len = max(len(vec1), len(vec2))
+    v1 = vec1 + [0.0] * (max_len - len(vec1))
+    v2 = vec2 + [0.0] * (max_len - len(vec2))
+    
+    dot_product = sum(a * b for a, b in zip(v1, v2))
+    norm1 = math.sqrt(sum(a * a for a in v1))
+    norm2 = math.sqrt(sum(b * b for b in v2))
+    
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+    
+    return dot_product / (norm1 * norm2)
+
+
+def simple_kmeans_clustering(texts: List[str], k: int = 3) -> Dict:
+    """
+    簡易K-meansクラスタリング（外部ライブラリ不要）
+    """
+    if len(texts) < 2:
+        return {"clusters": [{"texts": texts, "size": len(texts), "center": []}], "cluster_count": 1}
+    
+    k = min(k, len(texts))
+    
+    # テキストを埋め込み化
+    embeddings = [simple_text_embedding(text) for text in texts]
+    
+    # 初期クラスタセンターをランダムに選択
+    import random
+    center_indices = random.sample(range(len(embeddings)), k)
+    centers = [embeddings[i] for i in center_indices]
+    
+    # K-meansアルゴリズム（最大10イテレーション）
+    clusters = [[] for _ in range(k)]
+    
+    for iteration in range(10):
+        # クラスタをリセット
+        clusters = [[] for _ in range(k)]
+        
+        # 各テキストを最も近いクラスタに割り当て
+        for idx, embedding in enumerate(embeddings):
+            distances = [cosine_similarity(embedding, center) for center in centers]
+            closest_cluster = distances.index(max(distances))
+            clusters[closest_cluster].append(idx)
+        
+        # クラスタセンターを更新
+        new_centers = []
+        for cluster_indices in clusters:
+            if cluster_indices:
+                # クラスタ内のテキストの平均埋め込みを計算
+                cluster_embeddings = [embeddings[i] for i in cluster_indices]
+                avg_embedding = [sum(e[j] for e in cluster_embeddings) / len(cluster_embeddings) 
+                                for j in range(len(cluster_embeddings[0]))]
+                new_centers.append(avg_embedding)
+            else:
+                new_centers.append(random.choice(embeddings))
+        
+        # 収束チェック
+        if centers == new_centers:
+            break
+        centers = new_centers
+    
+    # クラスタを整理
+    result_clusters = []
+    for cluster_indices in clusters:
+        if cluster_indices:
+            cluster_texts = [texts[i] for i in cluster_indices]
+            result_clusters.append({
+                "texts": cluster_texts,
+                "size": len(cluster_texts),
+                "representative": cluster_texts[0] if cluster_texts else ""
+            })
+    
+    return {
+        "clusters": result_clusters,
+        "cluster_count": len(result_clusters)
+    }
+
+
+def generate_insights(messages: List[str], unit: str) -> List[str]:
+    """
+    メッセージから有意義なインサイトを生成
+    """
+    insights = []
+    
+    if not messages:
+        return insights
+    
+    full_text = " ".join(messages)
+    
+    # 1. 科学用語の定着度
+    if unit in SCIENCE_TERMS:
+        ratio, terms = calculate_science_term_ratio(full_text, unit)
+        if ratio > 50:
+            insights.append(f"✓ 高い科学用語使用率（{ratio:.1f}%）：児童が科学的用語を適切に使用しています")
+        elif ratio > 25:
+            insights.append(f"△ 中程度の科学用語使用率（{ratio:.1f}%）：生活語彙から科学用語への段階的な学習が進行中です")
+        else:
+            insights.append(f"△ 低い科学用語使用率（{ratio:.1f}%）：AIの指導支援によるさらなる語彙獲得が必要です")
+    
+    # 2. 論理的思考の深さ
+    if "から" in full_text or "なぜなら" in full_text or "ため" in full_text:
+        insights.append("✓ 因果関係を説明する表現が見られます：理科的思考の発達が進んでいます")
+    
+    # 3. 比較分析能力
+    if "より" in full_text or "違う" in full_text or "同じ" in full_text:
+        insights.append("✓ 比較・分析表現が見られます：複数の事象を関連づける力が育成されています")
+    
+    # 4. 経験との関連付け
+    if "やった" in full_text or "経験" in full_text or "前に" in full_text:
+        insights.append("✓ 経験とのリンケージが見られます：既有知識との結びつきが強くなっています")
+    
+    # 5. 対話の活発性
+    if len(messages) > 5:
+        insights.append(f"✓ 活発な対話：{len(messages)}個のメッセージを通じて深い思考が展開されています")
+    elif len(messages) > 2:
+        insights.append(f"△ 中程度の対話深度：{len(messages)}個のメッセージから基本的な理解が確認できます")
+    else:
+        insights.append(f"△ 対話の拡充が必要：より多くの質問への回答を通じて理解を深めることが重要です")
+    
+    # 6. メッセージ長の分析
+    avg_length = sum(len(m) for m in messages) / len(messages) if messages else 0
+    if avg_length > 30:
+        insights.append(f"✓ 詳細な回答：平均{avg_length:.0f}文字の回答により、児童の考えが十分に表現されています")
+    elif avg_length > 10:
+        insights.append(f"△ 中程度の詳細さ：平均{avg_length:.0f}文字の回答で基本的な理解を確認できます")
+    
+    return insights
+
+
+def analyze_response_quality(student_message: str, ai_response: str, unit: str) -> Dict:
+    """
+    児童の回答とAIの応答品質を分析
+    """
+    student_len = len(student_message)
+    response_len = len(ai_response)
+    
+    # 科学用語の使用状況
+    student_sci_ratio, student_terms = calculate_science_term_ratio(student_message, unit)
+    response_sci_ratio, response_terms = calculate_science_term_ratio(ai_response, unit)
+    
+    quality = {
+        "student_message_length": student_len,
+        "ai_response_length": response_len,
+        "student_science_term_ratio": student_sci_ratio,
+        "ai_science_term_ratio": response_sci_ratio,
+        "term_progression": response_sci_ratio > student_sci_ratio,  # AIが高い科学用語率を示唆している
+        "engagement_level": "high" if student_len > 25 else ("medium" if student_len > 5 else "low")
+    }
+    
+    return quality
+
+
+def cluster_and_analyze_conversations(logs_by_unit: Dict) -> Dict:
+    """
+    単元ごとに対話をクラスタリングして分析
+    """
+    clustering_results = {}
+    
+    for unit, logs in logs_by_unit.items():
+        if not logs:
+            continue
+        
+        # 対話テキストを抽出
+        messages = [log.get("user_message", "") for log in logs if log.get("user_message")]
+        
+        if len(messages) < 2:
+            clustering_results[unit] = {
+                "cluster_count": 1,
+                "clusters": [{"texts": messages, "size": len(messages)}],
+                "diversity_score": 0.0
+            }
+            continue
+        
+        # クラスタリング実行
+        clustering = simple_kmeans_clustering(messages, k=min(3, len(messages)))
+        
+        # 多様性スコア計算（クラスタ数と各クラスタのサイズのバランス）
+        cluster_sizes = [c["size"] for c in clustering["clusters"]]
+        avg_size = sum(cluster_sizes) / len(cluster_sizes) if cluster_sizes else 1
+        diversity = sum((size - avg_size) ** 2 for size in cluster_sizes) / len(cluster_sizes)
+        
+        clustering_results[unit] = {
+            "cluster_count": clustering["cluster_count"],
+            "clusters": clustering["clusters"],
+            "diversity_score": diversity,  # 0に近いほど均等、大きいほど不均等
+            "message_count": len(messages)
+        }
+    
+    return clustering_results

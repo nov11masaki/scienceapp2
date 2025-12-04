@@ -82,6 +82,22 @@
 
         <!-- 単元別分析 -->
         <div class="analysis-content">
+            <!-- インサイト・機械学習分析 -->
+            <div class="analysis-section insights-section">
+                <h2><i class="fas fa-brain"></i> AI分析による有意義なインサイト</h2>
+                <div id="insightsAnalysis" class="insights-container">
+                    <!-- インサイトがここに表示されます -->
+                </div>
+            </div>
+
+            <!-- クラスタリング分析 -->
+            <div class="analysis-section">
+                <h2><i class="fas fa-object-group"></i> 対話パターンのクラスタリング</h2>
+                <div id="clusteringAnalysis" class="clustering-container">
+                    <!-- クラスタリング結果がここに表示されます -->
+                </div>
+            </div>
+
             <!-- 予想段階の分析 -->
             <div class="analysis-section">
                 <h2><i class="fas fa-lightbulb"></i> 予想段階の分析</h2>
@@ -212,11 +228,99 @@ function displayAnalysis(analysis) {
     const avgRatio = unitCount > 0 ? (totalScienceTermRatio / unitCount).toFixed(1) : '-';
     document.getElementById('scienceTermRatio').textContent = avgRatio + '%';
 
+    // インサイトを表示
+    displayInsights(analysis.insights);
+    
+    // クラスタリング結果を表示
+    displayClustering(analysis.embeddings_analysis);
+
     // 予想段階の分析を表示
     displayPredictionAnalysis(analysis.predictions_by_unit, analysis.text_analysis);
 
     // 考察段階の分析を表示
     displayReflectionAnalysis(analysis.reflections_by_unit, analysis.text_analysis);
+}
+
+// インサイトを表示
+function displayInsights(insights) {
+    const container = document.getElementById('insightsAnalysis');
+    container.innerHTML = '';
+
+    if (!insights || Object.keys(insights).length === 0) {
+        container.innerHTML = '<p class="no-data">インサイトデータがありません</p>';
+        return;
+    }
+
+    for (const [unit, stage_insights] of Object.entries(insights)) {
+        const predictionInsights = stage_insights.prediction || [];
+        const reflectionInsights = stage_insights.reflection || [];
+        
+        const allInsights = predictionInsights.concat(reflectionInsights);
+        
+        if (allInsights.length === 0) continue;
+        
+        const html = `
+            <div class="unit-insights">
+                <h3>${unit}</h3>
+                <div class="insights-list">
+                    ${allInsights.map(insight => {
+                        const icon = insight.includes('✓') ? '✓' : '△';
+                        return `<div class="insight-item">${insight}</div>`;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+        container.innerHTML += html;
+    }
+}
+
+// クラスタリング結果を表示
+function displayClustering(clusteringData) {
+    const container = document.getElementById('clusteringAnalysis');
+    container.innerHTML = '';
+
+    if (!clusteringData || Object.keys(clusteringData).length === 0) {
+        container.innerHTML = '<p class="no-data">クラスタリングデータがありません</p>';
+        return;
+    }
+
+    for (const [unit, clustering] of Object.entries(clusteringData)) {
+        if (!clustering || clustering.error) {
+            continue;
+        }
+
+        const clusters = clustering.clusters || [];
+        const clusterCount = clustering.cluster_count || 0;
+        const diversityScore = clustering.diversity_score || 0;
+        
+        const html = `
+            <div class="unit-clustering">
+                <h3>${unit}</h3>
+                <div class="clustering-info">
+                    <div class="clustering-stat">
+                        <label>クラスタ数:</label>
+                        <span>${clusterCount}</span>
+                    </div>
+                    <div class="clustering-stat">
+                        <label>多様性スコア:</label>
+                        <span>${(diversityScore * 100).toFixed(1)}</span>
+                    </div>
+                </div>
+                <div class="clusters-list">
+                    ${clusters.map((cluster, idx) => `
+                        <div class="cluster-item">
+                            <h4>クラスタ ${idx + 1} (${cluster.size}件)</h4>
+                            <div class="cluster-samples">
+                                <strong>代表メッセージ:</strong>
+                                <p>${escapeHtml((cluster.representative || cluster.texts[0] || '').substring(0, 100))}</p>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+        container.innerHTML += html;
+    }
 }
 
 // 予想段階の分析を表示
@@ -707,6 +811,140 @@ function escapeHtml(text) {
 
 .btn-secondary:hover {
     background: #5a6268;
+}
+
+/* インサイトセクション */
+.insights-section {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+
+.insights-section h2 {
+    color: white;
+    margin-top: 0;
+}
+
+.insights-container {
+    display: grid;
+    gap: 15px;
+}
+
+.unit-insights {
+    background: white;
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.unit-insights h3 {
+    margin: 0 0 10px 0;
+    color: #f5576c;
+    font-size: 1.1rem;
+}
+
+.insights-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.insight-item {
+    padding: 10px 12px;
+    background: #f9f9f9;
+    border-left: 4px solid #f5576c;
+    border-radius: 4px;
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+
+.insight-item:contains("✓") {
+    border-left-color: #27ae60;
+    background: #f0fff4;
+}
+
+/* クラスタリングセクション */
+.clustering-container {
+    display: grid;
+    gap: 20px;
+}
+
+.unit-clustering {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    border-left: 4px solid #3498db;
+}
+
+.unit-clustering h3 {
+    margin-top: 0;
+    color: #3498db;
+}
+
+.clustering-info {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.clustering-stat {
+    padding: 10px;
+    background: #ecf0f1;
+    border-radius: 4px;
+}
+
+.clustering-stat label {
+    display: block;
+    font-size: 0.85rem;
+    color: #666;
+    margin-bottom: 5px;
+    font-weight: 600;
+}
+
+.clustering-stat span {
+    display: block;
+    font-size: 1.3rem;
+    font-weight: bold;
+    color: #3498db;
+}
+
+.clusters-list {
+    display: grid;
+    gap: 15px;
+}
+
+.cluster-item {
+    padding: 12px;
+    background: #f8f9fa;
+    border-left: 3px solid #3498db;
+    border-radius: 4px;
+}
+
+.cluster-item h4 {
+    margin: 0 0 8px 0;
+    color: #2980b9;
+    font-size: 0.95rem;
+}
+
+.cluster-samples {
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+.cluster-samples strong {
+    color: #333;
+}
+
+.cluster-samples p {
+    margin: 5px 0 0 0;
+    padding: 8px;
+    background: white;
+    border-radius: 3px;
+    color: #555;
+    word-break: break-word;
 }
 </style>
 {% endblock %}
