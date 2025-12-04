@@ -14,12 +14,12 @@ import os
 
 # OpenAI設定（オプション）
 try:
-    import openai
+    from openai import OpenAI
     OPENAI_AVAILABLE = True
-    openai.api_key = os.getenv("OPENAI_API_KEY")
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 except ImportError:
     print("[WARN] openai module not available, using fallback embeddings")
-    openai = None
+    client = None
     OPENAI_AVAILABLE = False
 
 # 小学生向け理科用語辞書（単元ごと）
@@ -323,19 +323,19 @@ def simple_text_embedding(text: str) -> List[float]:
 def get_text_embedding(text: str) -> List[float]:
     """
     OpenAI Embeddings APIを使用してテキストを埋め込みベクトルに変換
-    text-embedding-3-smallモデルを使用（3072次元）
+    text-embedding-3-smallモデルを使用（1536次元）
     APIが利用不可の場合は簡易実装を使用
     """
-    if not OPENAI_AVAILABLE or not openai:
+    if not OPENAI_AVAILABLE or not client:
         # フォールバック：簡易実装
         return simple_text_embedding(text)
     
     try:
-        response = openai.Embedding.create(
+        response = client.embeddings.create(
             input=text,
             model="text-embedding-3-small"
         )
-        return response['data'][0]['embedding']
+        return response.data[0].embedding
     except Exception as e:
         print(f"[WARN] Embedding API error: {e}, using fallback embedding")
         # フォールバック：簡易実装
