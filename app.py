@@ -2894,8 +2894,18 @@ def analyze_predictions_and_reflections(logs):
                 print(f"[INSIGHTS] Skipping insights for {unit}: {insight_err}")
                 result['insights'][unit] = {'prediction': [], 'reflection': []}
             
-            # プロンプト改善提案（スキップ - 外部関数がないため）
-            result['prompt_recommendations'][unit] = []
+            # プロンプト改善提案
+            try:
+                result['prompt_recommendations'][unit] = generate_prompt_recommendations(
+                    prediction_messages,
+                    reflection_messages,
+                    result.get('text_analysis', {}).get(unit, {}),
+                    result.get('insights', {}).get(unit, {}),
+                    unit
+                )
+            except Exception as prompt_err:
+                print(f"[PROMPTS] Skipping prompts for {unit}: {prompt_err}")
+                result['prompt_recommendations'][unit] = []
         
         return result
     
@@ -2904,6 +2914,125 @@ def analyze_predictions_and_reflections(logs):
         import traceback
         traceback.print_exc()
         return {'error': str(e)}
+
+
+def generate_prompt_recommendations(prediction_messages, reflection_messages, text_analysis, insights, unit):
+    """分析結果に基づいてプロンプト改善提案を生成"""
+    recommendations = []
+    
+    try:
+        # 1. 予想段階の回答の短さをチェック
+        if prediction_messages:
+            avg_pred_length = sum(len(m) for m in prediction_messages) / len(prediction_messages)
+            if avg_pred_length < 20:
+                recommendations.append({
+                    'type': 'prediction_depth',
+                    'issue': '予想の説明が短い',
+                    'current': f'平均{avg_pred_length:.0f}文字',
+                    'suggestion': '「なぜそう思いますか？」「理由を詳しく教えてください」などの追加質問を用意してください',
+                    'priority': 'high',
+                    'impact': '児童の思考を深める'
+                })
+        
+        # 2. 考察段階の回答の短さをチェック
+        if reflection_messages:
+            avg_refl_length = sum(len(m) for m in reflection_messages) / len(reflection_messages)
+            if avg_refl_length < 25:
+                recommendations.append({
+                    'type': 'reflection_depth',
+                    'issue': '考察の説明が短い',
+                    'current': f'平均{avg_refl_length:.0f}文字',
+                    'suggestion': '「実験結果と予想の違いは何ですか？」「なぜそのような違いが生まれたのか」を含めるようにしてください',
+                    'priority': 'high',
+                    'impact': '実験結果の分析を深化させる'
+                })
+        
+        # 3. 対話の回数が少ないかチェック
+        total_exchanges = len(prediction_messages) + len(reflection_messages)
+        if total_exchanges < 6:
+            recommendations.append({
+                'type': 'engagement',
+                'issue': '対話の回数が少ない',
+                'current': f'{total_exchanges}件',
+                'suggestion': 'より開かれた質問を心がけてください。「はい/いいえ」で答えられない質問を増やすことで、児童の考えを引き出せます',
+                'priority': 'medium',
+                'impact': '児童の思考活動量が増加'
+            })
+        
+        # 4. インサイト分析に基づく提案
+        if isinstance(insights, dict):
+            pred_insights = insights.get('prediction', [])
+            refl_insights = insights.get('reflection', [])
+            
+            # 科学用語の使用率が低い場合
+            if any('科学用語' in str(i) and '低い' in str(i) for i in pred_insights):
+                recommendations.append({
+                    'type': 'vocabulary',
+                    'issue': '科学用語の定着が不十分',
+                    'current': '定着度が低い',
+                    'suggestion': '予想や考察の際に「温度」「体積」「膨張」などの単元の科学用語を児童に促すような表現を含めてください',
+                    'priority': 'medium',
+                    'impact': '科学用語の習得を促進'
+                })
+            
+            # 因果関係の説明が不足している場合
+            if any('因果' in str(i) or '理由' in str(i) for i in pred_insights):
+                recommendations.append({
+                    'type': 'causality',
+                    'issue': '因果関係の説明が必要',
+                    'current': '因果表現が少ない',
+                    'suggestion': '「なぜそうなると思いますか」「その理由は何ですか」など、因果関係を説明させる質問を増やしてください',
+                    'priority': 'medium',
+                    'impact': '科学的思考力の育成'
+                })
+        
+        # 5. テキスト分析に基づく提案
+        if isinstance(text_analysis, dict):
+            avg_length = text_analysis.get('average_length', 0)
+            
+            if avg_length > 0:
+                if 100 < avg_length < 200:
+                    recommendations.append({
+                        'type': 'balance',
+                        'issue': 'バランスの取れた説明',
+                        'current': f'平均{avg_length:.0f}文字',
+                        'suggestion': '現在の質問スタイルは良好です。このバランスを維持しながら、より深い思考を促す質問を追加できます',
+                        'priority': 'low',
+                        'impact': 'レベルアップの基盤ができている'
+                    })
+                elif avg_length > 200:
+                    recommendations.append({
+                        'type': 'conciseness',
+                        'issue': '回答が長い傾向',
+                        'current': f'平均{avg_length:.0f}文字',
+                        'suggestion': 'AIが簡潔な質問を心がけ、児童の重要なポイントを引き出すようにしてください',
+                        'priority': 'low',
+                        'impact': '効率的な思考整理'
+                    })
+        
+        # 6. 予想と考察のギャップ分析
+        if prediction_messages and reflection_messages:
+            pred_word_count = sum(len(m.split()) for m in prediction_messages)
+            refl_word_count = sum(len(m.split()) for m in reflection_messages)
+            
+            if pred_word_count > refl_word_count * 2:
+                recommendations.append({
+                    'type': 'reflection_emphasis',
+                    'issue': '考察段階の対話が予想に比べて少ない',
+                    'current': f'予想：{len(prediction_messages)}件 / 考察：{len(reflection_messages)}件',
+                    'suggestion': '考察段階でAIが実験結果との比較をより丁寧に促すようにしてください。予想と実験結果の違いについて深く掘り下げる質問を準備してください',
+                    'priority': 'high',
+                    'impact': '実験から学ぶ効果が向上'
+                })
+        
+        # 優先度でソート
+        recommendations.sort(key=lambda x: {'high': 0, 'medium': 1, 'low': 2}.get(x.get('priority', 'low'), 3))
+        
+        return recommendations
+    
+    except Exception as e:
+        print(f"[PROMPT_RECOMMENDATIONS] Error: {e}")
+        return []
 
 
 def analyze_with_embeddings(prediction_messages, reflection_messages, unit):
