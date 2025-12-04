@@ -16,9 +16,21 @@ import os
 try:
     from openai import OpenAI
     OPENAI_AVAILABLE = True
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-except ImportError:
-    print("[WARN] openai module not available, using fallback embeddings")
+    _api_key = os.getenv("OPENAI_API_KEY")
+    if not _api_key:
+        print("[WARN] OPENAI_API_KEY not set; disabling OpenAI features")
+        client = None
+        OPENAI_AVAILABLE = False
+    else:
+        try:
+            client = OpenAI(api_key=_api_key)
+        except Exception as e:
+            print(f"[WARN] Failed to initialize OpenAI client: {e}")
+            client = None
+            OPENAI_AVAILABLE = False
+except Exception as e:
+    # openai not installed or other import/init error
+    print(f"[WARN] openai library unavailable or init failed: {e}")
     client = None
     OPENAI_AVAILABLE = False
 
