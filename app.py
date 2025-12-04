@@ -2869,17 +2869,9 @@ def analyze_predictions_and_reflections(logs):
                 'reflection': analyze_text(reflection_messages, unit)
             }
             
-            # クラスタリング分析（簡易実装で外部ライブラリ不要）
-            try:
-                combined_logs = (
-                    [{'user_message': m} for m in prediction_messages] +
-                    [{'user_message': m} for m in reflection_messages]
-                )
-                clustering_result = cluster_and_analyze_conversations({unit: combined_logs})
-                result['embeddings_analysis'][unit] = clustering_result.get(unit, {})
-            except Exception as cluster_err:
-                print(f"[CLUSTERING] Skipping clustering for {unit}: {cluster_err}")
-                result['embeddings_analysis'][unit] = {'clusters': [], 'cluster_count': 0, 'error': str(cluster_err)}
+            # クラスタリング分析（embeddingsなしでスキップ）
+            print(f"[CLUSTERING] Skipping embeddings analysis to reduce memory/API usage")
+            result['embeddings_analysis'][unit] = {'clusters': [], 'cluster_count': 0, 'skipped': True}
             
             # 有意義なインサイト生成
             try:
