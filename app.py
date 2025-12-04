@@ -3148,113 +3148,45 @@ def teacher_analysis():
             logs = load_learning_logs(date)
             analysis_period = date
         elif start_date and end_date:
-            # 期間指定
+            # 期間指定 - GCS優先で読み込み
             print(f"[ANALYSIS] Loading logs for period {start_date} to {end_date}, unit={unit}")
             from datetime import datetime as dt
             start_dt = dt.strptime(start_date, '%Y%m%d')
             end_dt = dt.strptime(end_date, '%Y%m%d')
             
-            # 日付範囲内の全てのログファイルを読み込み
-            # GCS優先、失敗時はローカルから読み込み
-            if USE_GCS and bucket:
-                try:
-                    print(f"[ANALYSIS] Fetching logs from GCS for period {start_date} to {end_date}")
-                    # タイムアウト対応（5秒）
-                    import signal
-                    def timeout_handler(signum, frame):
-                        raise TimeoutError("GCS request timeout")
-                    
-                    signal.signal(signal.SIGALRM, timeout_handler)
-                    signal.alarm(5)  # 5秒でタイムアウト
-                    try:
-                        blobs = list(bucket.list_blobs(prefix='logs/learning_log_', max_results=100))
-                        signal.alarm(0)  # タイマーキャンセル
-                    except Exception:
-                        signal.alarm(0)  # タイマーキャンセル
-                        raise
-                    
-                    for blob in blobs:
-                        try:
-                            # ファイル名から日付を抽出 (learning_log_YYYYMMDD.json)
-                            file_date_str = os.path.basename(blob.name).replace('learning_log_', '').replace('.json', '')
-                            if len(file_date_str) == 8 and file_date_str.isdigit():
-                                file_date = dt.strptime(file_date_str, '%Y%m%d')
-                                if start_dt <= file_date <= end_dt:
-                                    content = blob.download_as_string()
-                                    file_logs = json.loads(content.decode('utf-8'))
-                                    if isinstance(file_logs, list):
-                                        logs.extend(file_logs)
-                        except Exception as e:
-                            print(f"[ANALYSIS] Warning: Could not read {blob.name}: {e}")
-                except Exception as gcs_err:
-                    print(f"[ANALYSIS] GCS fetch failed: {gcs_err}, falling back to local logs")
-                    logs = []  # GCS失敗時はリセット
+            # GCS優先で全ログ日付リストを取得
+            available_dates = get_available_log_dates()
+            target_dates = [d for d in available_dates if start_date <= d <= end_date]
             
-            # GCS失敗またはGCS無効時：ローカルから読み込み
-            if not logs:
-                import glob
-                log_files = sorted(glob.glob('logs/learning_log_*.json'))
-                for log_file in log_files:
-                    try:
-                        # ファイル名から日付を抽出 (learning_log_YYYYMMDD.json)
-                        file_date_str = os.path.basename(log_file).replace('learning_log_', '').replace('.json', '')
-                        if len(file_date_str) == 8 and file_date_str.isdigit():
-                            file_date = dt.strptime(file_date_str, '%Y%m%d')
-                            if start_dt <= file_date <= end_dt:
-                                with open(log_file, 'r', encoding='utf-8') as f:
-                                    file_logs = json.load(f)
-                                    if isinstance(file_logs, list):
-                                        logs.extend(file_logs)
-                    except Exception as e:
-                        print(f"[ANALYSIS] Warning: Could not read {log_file}: {e}")
+            print(f"[ANALYSIS] Found {len(target_dates)} log dates in range")
+            
+            # 各日付のログを GCS から読み込み
+            for target_date in target_dates:
+                try:
+                    date_logs = load_learning_logs(target_date)
+                    if date_logs:
+                        logs.extend(date_logs)
+                        print(f"[ANALYSIS] Loaded {len(date_logs)} logs from {target_date}")
+                except Exception as e:
+                    print(f"[ANALYSIS] Warning: Could not read logs for {target_date}: {e}")
             
             analysis_period = f"{start_date} to {end_date}"
         else:
-            # 全期間：全てのログファイルを読み込み
+            # 全期間 - GCS優先で読み込み
             print(f"[ANALYSIS] Loading logs for all periods, unit={unit}")
             
-            # GCS優先、失敗時はローカルから読み込み
-            if USE_GCS and bucket:
-                try:
-                    print(f"[ANALYSIS] Fetching all logs from GCS")
-                    # タイムアウト対応（5秒）
-                    import signal
-                    def timeout_handler(signum, frame):
-                        raise TimeoutError("GCS request timeout")
-                    
-                    signal.signal(signal.SIGALRM, timeout_handler)
-                    signal.alarm(5)  # 5秒でタイムアウト
-                    try:
-                        blobs = list(bucket.list_blobs(prefix='logs/learning_log_', max_results=100))
-                        signal.alarm(0)  # タイマーキャンセル
-                    except Exception:
-                        signal.alarm(0)  # タイマーキャンセル
-                        raise
-                    
-                    for blob in blobs:
-                        try:
-                            content = blob.download_as_string()
-                            file_logs = json.loads(content.decode('utf-8'))
-                            if isinstance(file_logs, list):
-                                logs.extend(file_logs)
-                        except Exception as e:
-                            print(f"[ANALYSIS] Warning: Could not read {blob.name}: {e}")
-                except Exception as gcs_err:
-                    print(f"[ANALYSIS] GCS fetch failed: {gcs_err}, falling back to local logs")
-                    logs = []  # GCS失敗時はリセット
+            # GCSから全利用可能ログを読み込み
+            available_dates = get_available_log_dates()
+            print(f"[ANALYSIS] Found {len(available_dates)} available log dates")
             
-            # GCS失敗またはGCS無効時：ローカルから読み込み
-            if not logs:
-                import glob
-                log_files = sorted(glob.glob('logs/learning_log_*.json'))
-                for log_file in log_files:
-                    try:
-                        with open(log_file, 'r', encoding='utf-8') as f:
-                            file_logs = json.load(f)
-                            if isinstance(file_logs, list):
-                                logs.extend(file_logs)
-                    except Exception as e:
-                        print(f"[ANALYSIS] Warning: Could not read {log_file}: {e}")
+            for target_date in available_dates:
+                try:
+                    date_logs = load_learning_logs(target_date)
+                    if date_logs:
+                        logs.extend(date_logs)
+                        print(f"[ANALYSIS] Loaded {len(date_logs)} logs from {target_date}")
+                except Exception as e:
+                    print(f"[ANALYSIS] Warning: Could not read logs for {target_date}: {e}")
             
             analysis_period = "全期間"
         
