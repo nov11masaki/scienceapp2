@@ -24,8 +24,24 @@
             </select>
         </div>
         <div class="filter-group">
+            <label for="analysisMode">分析期間:</label>
+            <select id="analysisMode" onchange="updateDateInputs()">
+                <option value="single">指定日付</option>
+                <option value="period">期間指定</option>
+                <option value="all">全期間</option>
+            </select>
+        </div>
+        <div class="filter-group" id="singleDateGroup">
             <label for="dateInput">日付:</label>
             <input type="date" id="dateInput" />
+        </div>
+        <div class="filter-group" id="periodStartGroup">
+            <label for="periodStart">開始日:</label>
+            <input type="date" id="periodStart" />
+        </div>
+        <div class="filter-group" id="periodEndGroup">
+            <label for="periodEnd">終了日:</label>
+            <input type="date" id="periodEnd" />
         </div>
         <button onclick="loadAnalysis()" class="btn btn-primary">分析を読み込む</button>
     </section>
@@ -93,27 +109,69 @@
 
 {% block scripts %}
 <script>
+// 分析期間の入力フィールドの表示/非表示を切り替え
+function updateDateInputs() {
+    const mode = document.getElementById('analysisMode').value;
+    const singleDateGroup = document.getElementById('singleDateGroup');
+    const periodStartGroup = document.getElementById('periodStartGroup');
+    const periodEndGroup = document.getElementById('periodEndGroup');
+    
+    // 全てのグループをリセット
+    singleDateGroup.style.display = 'none';
+    periodStartGroup.classList.remove('visible');
+    periodEndGroup.classList.remove('visible');
+    
+    if (mode === 'single') {
+        singleDateGroup.style.display = 'flex';
+    } else if (mode === 'period') {
+        periodStartGroup.classList.add('visible');
+        periodEndGroup.classList.add('visible');
+    }
+    // mode === 'all' の場合は何も表示しない
+}
+
 // 初期化
 document.addEventListener('DOMContentLoaded', function() {
     // 本日の日付をデフォルトに設定
     const today = new Date().toISOString().slice(0, 10);
     document.getElementById('dateInput').value = today;
+    document.getElementById('periodStart').value = '2025-01-01';
+    document.getElementById('periodEnd').value = today;
 });
 
 // 分析データを読み込む
 function loadAnalysis() {
     const unit = document.getElementById('unitSelect').value;
-    const date = document.getElementById('dateInput').value;
-
-    if (!date) {
-        alert('日付を選択してください');
-        return;
+    const mode = document.getElementById('analysisMode').value;
+    
+    let queryParams = `?unit=${encodeURIComponent(unit)}`;
+    
+    if (mode === 'single') {
+        const date = document.getElementById('dateInput').value;
+        if (!date) {
+            alert('日付を選択してください');
+            return;
+        }
+        const formattedDate = date.replace(/-/g, '');
+        queryParams += `&date=${formattedDate}`;
+    } else if (mode === 'period') {
+        const startDate = document.getElementById('periodStart').value;
+        const endDate = document.getElementById('periodEnd').value;
+        
+        if (!startDate || !endDate) {
+            alert('開始日と終了日を選択してください');
+            return;
+        }
+        if (new Date(startDate) > new Date(endDate)) {
+            alert('開始日は終了日より前である必要があります');
+            return;
+        }
+        
+        queryParams += `&start_date=${startDate.replace(/-/g, '')}&end_date=${endDate.replace(/-/g, '')}`;
     }
+    // mode === 'all' の場合は日付パラメータなしで全期間を取得
 
-    // 日付をYYYYMMDD形式に変換
-    const formattedDate = date.replace(/-/g, '');
-
-    fetch(`/teacher/analysis?date=${formattedDate}&unit=${unit}`)
+    fetch(`/teacher/analysis${queryParams}`)
         .then(response => {
             if (!response.ok) {
                 return response.text().then(text => {
@@ -386,6 +444,17 @@ function escapeHtml(text) {
     border: 1px solid #ddd;
     border-radius: 4px;
     font-size: 0.95rem;
+}
+
+/* 期間指定グループの表示/非表示 */
+#periodStartGroup, 
+#periodEndGroup {
+    display: none;
+}
+
+#periodStartGroup.visible,
+#periodEndGroup.visible {
+    display: flex;
 }
 
 /* 統計情報 */

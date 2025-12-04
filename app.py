@@ -3094,14 +3094,67 @@ def analysis_dashboard():
 @app.route('/teacher/analysis')
 @require_teacher_auth
 def teacher_analysis():
-    """教員用分析ダッシュボード"""
+    """教員用分析ダッシュボード（指定日付、期間、または全期間で分析可能）"""
     unit = request.args.get('unit', '')
-    date = request.args.get('date', datetime.now().strftime('%Y%m%d'))
+    date = request.args.get('date', '')
+    start_date = request.args.get('start_date', '')
+    end_date = request.args.get('end_date', '')
+    
+    logs = []
+    analysis_period = "不明"
     
     try:
-        # ログを読み込み
-        print(f"[ANALYSIS] Loading logs for date={date}, unit={unit}")
-        logs = load_learning_logs(date)
+        # 日付パラメータに基づいてログを読み込み
+        if date:
+            # 指定日付のみ
+            print(f"[ANALYSIS] Loading logs for date={date}, unit={unit}")
+            logs = load_learning_logs(date)
+            analysis_period = date
+        elif start_date and end_date:
+            # 期間指定
+            print(f"[ANALYSIS] Loading logs for period {start_date} to {end_date}, unit={unit}")
+            from datetime import datetime as dt
+            start_dt = dt.strptime(start_date, '%Y%m%d')
+            end_dt = dt.strptime(end_date, '%Y%m%d')
+            
+            # 日付範囲内の全てのログファイルを読み込み
+            import glob
+            log_dir = os.path.dirname(os.path.abspath(LEARNING_LOG_FILE)) if hasattr(LEARNING_LOG_FILE, '__iter__') else 'logs'
+            log_files = sorted(glob.glob(f'{log_dir}/learning_log_*.json'))
+            
+            for log_file in log_files:
+                try:
+                    # ファイル名から日付を抽出 (learning_log_YYYYMMDD.json)
+                    file_date_str = os.path.basename(log_file).replace('learning_log_', '').replace('.json', '')
+                    if len(file_date_str) == 8 and file_date_str.isdigit():
+                        file_date = dt.strptime(file_date_str, '%Y%m%d')
+                        if start_dt <= file_date <= end_dt:
+                            with open(log_file, 'r', encoding='utf-8') as f:
+                                file_logs = json.load(f)
+                                if isinstance(file_logs, list):
+                                    logs.extend(file_logs)
+                except Exception as e:
+                    print(f"[ANALYSIS] Warning: Could not read {log_file}: {e}")
+            
+            analysis_period = f"{start_date} to {end_date}"
+        else:
+            # 全期間：全てのログファイルを読み込み
+            print(f"[ANALYSIS] Loading logs for all periods, unit={unit}")
+            import glob
+            log_dir = os.path.dirname(os.path.abspath(LEARNING_LOG_FILE)) if hasattr(LEARNING_LOG_FILE, '__iter__') else 'logs'
+            log_files = sorted(glob.glob(f'{log_dir}/learning_log_*.json'))
+            
+            for log_file in log_files:
+                try:
+                    with open(log_file, 'r', encoding='utf-8') as f:
+                        file_logs = json.load(f)
+                        if isinstance(file_logs, list):
+                            logs.extend(file_logs)
+                except Exception as e:
+                    print(f"[ANALYSIS] Warning: Could not read {log_file}: {e}")
+            
+            analysis_period = "全期間"
+        
         print(f"[ANALYSIS] Loaded {len(logs)} logs")
         
         if unit:
@@ -3133,6 +3186,9 @@ def teacher_analysis():
         return jsonify({
             'success': True,
             'date': date,
+            'start_date': start_date,
+            'end_date': end_date,
+            'analysis_period': analysis_period,
             'unit': unit,
             'analysis': analysis_result,
             'log_count': len(logs)
