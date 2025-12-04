@@ -661,9 +661,20 @@ function ensureInputVisible() {
         const messagesContainer = document.getElementById('chatMessages');
         const inputArea = document.querySelector('.user-input-area');
         if (!messagesContainer || !inputArea) return;
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+        // スクロールを一番下に持ってくる
+        requestAnimationFrame(() => {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        });
+
+        // 追加で数ピクセル余裕を持たせる（キーボード表示等の変化に対応）
         const extra = 8;
-        messagesContainer.scrollTop = Math.max(0, messagesContainer.scrollHeight - messagesContainer.clientHeight + extra);
+        requestAnimationFrame(() => {
+            messagesContainer.scrollTop = Math.max(0, messagesContainer.scrollHeight - messagesContainer.clientHeight + extra);
+        });
+        
+        // 入力欄が見える状態に
+        inputArea.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } catch (e) {
         console.error('ensureInputVisible error', e);
     }
