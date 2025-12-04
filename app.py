@@ -3,6 +3,10 @@ import openai
 import os
 import sys
 from dotenv import load_dotenv
+
+# 環境変数を読み込み（他のモジュールインポート前に実行）
+load_dotenv()
+
 import json
 from datetime import datetime
 import csv
@@ -51,9 +55,6 @@ import rq as _rq
 from rq.job import Job as _RQJob
 
 
-# 環境変数を読み込み
-load_dotenv()
-
 # 学習進行状況管理用のファイルパス（環境変数で上書き可能）
 LEARNING_PROGRESS_FILE = os.environ.get('LEARNING_PROGRESS_FILE', 'learning_progress.json')
 PROMPTS_DIR = Path('prompts')
@@ -73,25 +74,39 @@ bucket = None
 if USE_GCS:
     try:
         from google.cloud import storage
-        gcp_project = os.getenv('GCP_PROJECT_ID')
-        storage_client = storage.Client(project=gcp_project)
-        bucket_name = os.getenv('GCS_BUCKET_NAME', 'science-buddy-logs')
-        bucket = storage_client.bucket(bucket_name)
+        import google.auth
         
-        # バケット接続確認（タイムアウト対応）
+        gcp_project = os.getenv('GCP_PROJECT_ID')
+        bucket_name = os.getenv('GCS_BUCKET_NAME', 'science-buddy-logs')
+        
+        # Application Default Credentials を使用（GOOGLE_APPLICATION_CREDENTIALS 環境変数を優先）
+        # ローカルは gcloud auth で、Cloud Run はサービスアカウントで自動的に機能
         try:
-            if bucket.exists():
-                print(f"[INIT] GCS bucket '{bucket_name}' initialized successfully")
-            else:
-                print(f"[INIT] GCS bucket '{bucket_name}' does not exist, using local storage")
-                USE_GCS = False
-                bucket = None
-        except Exception as e:
-            print(f"[INIT] GCS bucket check failed: {e}, falling back to local storage")
+            credentials, project = google.auth.default()
+            print(f"[INIT] GCS auth using ADC (detected project: {project})")
+        except Exception as auth_err:
+            print(f"[INIT] GCS auth error: {auth_err}")
+            credentials = None
+        
+        if credentials:
+            # 認証成功 = GCS 接続準備完了と見なす
+            # Note: Cloud Resource Manager API が無効なため、バケットメタデータテストはスキップ
+            # 実際の読み書きは ADC を使って gsutil 互換の JSON API で実行
+            storage_client = storage.Client(credentials=credentials)
+            bucket = storage_client.bucket(bucket_name)
+            
+            print(f"[INIT] GCS bucket '{bucket_name}' configured for use (project: {gcp_project})")
+            print(f"[INIT] Note: actual I/O operations will use ADC credentials from gcloud CLI")
+            # GCS モード有効を継続（バケットメタデータテストなし）
+        else:
+            print(f"[INIT] GCS credentials not available, using local storage")
             USE_GCS = False
             bucket = None
+            
     except Exception as e:
-        print(f"[INIT] Warning: GCS initialization failed: {e}, using local storage")
+        print(f"[INIT] GCS initialization failed: {type(e).__name__}: {e}")
+        import traceback
+        print(f"[INIT] Traceback: {traceback.format_exc()}")
         USE_GCS = False
         bucket = None
 else:
