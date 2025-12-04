@@ -2776,7 +2776,8 @@ def analyze_logs_simple(logs):
         'predictions_by_unit': {},
         'reflections_by_unit': {},
         'text_analysis': {},
-        'ai_insights': {}
+        'ai_insights': {},
+        'dialogue_clusters': {}
     }
     
     # 単元ごとに分類
@@ -2820,6 +2821,12 @@ def analyze_logs_simple(logs):
             'reflection': analyze_text(reflection_messages, unit)
         }
         
+        # 対話パターンのクラスタリング
+        all_messages = prediction_messages + reflection_messages
+        clustering_result = cluster_dialogue_patterns(all_messages)
+        result['dialogue_clusters'][unit] = clustering_result
+        print(f"[CLUSTERING] Unit '{unit}': {clustering_result.get('cluster_count', 0)} clusters found")
+        
         # 生成AIで傾向分析とプロンプト改善提案
         try:
             ai_analysis = generate_ai_insights(prediction_messages, reflection_messages, unit)
@@ -2828,59 +2835,140 @@ def analyze_logs_simple(logs):
             print(f"[AI_INSIGHTS] Error for {unit}: {e}")
             result['ai_insights'][unit] = {
                 'error': str(e),
-                'trends': 'AI分析に失敗しました',
-                'prompt_suggestions': 'プロンプト提案を生成できませんでした'
+                'analysis_text': 'AI分析に失敗しました'
             }
     
     return result
 
 
 def generate_ai_insights(prediction_messages, reflection_messages, unit):
-    """生成AIで学習傾向を分析し、プロンプト改善提案を生成"""
+    """OpenAI APIで傾向分析とプロンプト改善提案を生成"""
     try:
         # サンプルデータを作成（最大20件ずつ）
         pred_sample = prediction_messages[:20] if len(prediction_messages) > 20 else prediction_messages
         refl_sample = reflection_messages[:20] if len(reflection_messages) > 20 else reflection_messages
         
+        if not pred_sample and not refl_sample:
+            return {
+                'analysis_text': 'データが不足しているため分析できません。',
+                'prediction_count': 0,
+                'reflection_count': 0
+            }
+        
         # プロンプトを構築
         analysis_prompt = f"""以下は理科の単元「{unit}」における児童の予想と考察の記録です。
 
 【予想の記録】（{len(pred_sample)}件）
-{chr(10).join([f"{i+1}. {msg}" for i, msg in enumerate(pred_sample)])}
+{chr(10).join([f"{i+1}. {msg}" for i, msg in enumerate(pred_sample)]) if pred_sample else "なし"}
 
 【考察の記録】（{len(refl_sample)}件）
-{chr(10).join([f"{i+1}. {msg}" for i, msg in enumerate(refl_sample)])}
+{chr(10).join([f"{i+1}. {msg}" for i, msg in enumerate(refl_sample)]) if refl_sample else "なし"}
 
 これらの記録を分析して、以下の2点を簡潔に教えてください：
 
-1. **学習傾向**: 児童の思考パターンや理解度の特徴（200字以内）
-2. **プロンプト改善提案**: AIがより効果的な質問をするための具体的な改善案（300字以内）
+1. **対話パターンの傾向**: 児童の思考パターンや対話の特徴（150字以内）
+2. **プロンプト改善提案**: AIがより効果的な質問をするための具体的な改善案（200字以内）
 
-テキスト形式で、読みやすく箇条書きも含めて回答してください。"""
+テキスト形式で簡潔に回答してください。"""
 
+        print(f"[AI_ANALYSIS] Calling OpenAI API for unit: {unit}")
+        
         # OpenAI APIで分析
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "あなたは理科教育の専門家です。児童の学習ログから傾向を分析し、教育的な改善提案をします。"},
+                {"role": "system", "content": "あなたは理科教育の専門家です。児童の学習ログから対話パターンを分析し、プロンプト改善を提案します。"},
                 {"role": "user", "content": analysis_prompt}
             ],
-            max_tokens=800,
+            max_tokens=600,
             temperature=0.7
         )
         
         ai_response = response.choices[0].message.content.strip()
+        print(f"[AI_ANALYSIS] OpenAI response received: {len(ai_response)} chars")
         
         return {
-            'trends': ai_response,
+            'analysis_text': ai_response,
             'prediction_count': len(prediction_messages),
             'reflection_count': len(reflection_messages),
             'sample_size': f"予想{len(pred_sample)}件、考察{len(refl_sample)}件を分析"
         }
         
     except Exception as e:
-        print(f"[AI_INSIGHTS] Generation error: {e}")
-        raise
+        print(f"[AI_ANALYSIS] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            'analysis_text': f'AI分析でエラーが発生しました: {str(e)}',
+            'prediction_count': len(prediction_messages),
+            'reflection_count': len(reflection_messages),
+            'error': str(e)
+        }
+
+
+def cluster_dialogue_patterns(messages):
+    """対話パターンのクラスタリング（簡易版）"""
+    if len(messages) < 3:
+        return {
+            'clusters': [],
+            'cluster_count': 0,
+            'note': 'データが少なすぎるためクラスタリングできません'
+        }
+    
+    try:
+        # メッセージの長さと特徴でグループ化
+        clusters = {
+            'short': [],  # 短い回答（20文字未満）
+            'medium': [],  # 中程度（20-60文字）
+            'long': []  # 長い回答（60文字以上）
+        }
+        
+        for msg in messages:
+            length = len(msg)
+            if length < 20:
+                clusters['short'].append(msg)
+            elif length < 60:
+                clusters['medium'].append(msg)
+            else:
+                clusters['long'].append(msg)
+        
+        # 結果を整形
+        result_clusters = []
+        if clusters['short']:
+            result_clusters.append({
+                'label': '簡潔な回答',
+                'count': len(clusters['short']),
+                'samples': clusters['short'][:3],
+                'avg_length': sum(len(m) for m in clusters['short']) / len(clusters['short'])
+            })
+        if clusters['medium']:
+            result_clusters.append({
+                'label': '標準的な回答',
+                'count': len(clusters['medium']),
+                'samples': clusters['medium'][:3],
+                'avg_length': sum(len(m) for m in clusters['medium']) / len(clusters['medium'])
+            })
+        if clusters['long']:
+            result_clusters.append({
+                'label': '詳細な回答',
+                'count': len(clusters['long']),
+                'samples': clusters['long'][:3],
+                'avg_length': sum(len(m) for m in clusters['long']) / len(clusters['long'])
+            })
+        
+        return {
+            'clusters': result_clusters,
+            'cluster_count': len(result_clusters),
+            'total_messages': len(messages)
+        }
+        
+    except Exception as e:
+        print(f"[CLUSTERING] Error: {e}")
+        return {
+            'clusters': [],
+            'cluster_count': 0,
+            'error': str(e)
+        }
     
 
 def analyze_text(messages, unit=None):
