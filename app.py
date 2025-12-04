@@ -2705,14 +2705,183 @@ def analysis_dashboard():
 @app.route('/teacher/analysis')
 @require_teacher_auth
 def teacher_analysis():
-    """教員用分析ダッシュボード（分析機能は廃止されました）"""
-    return jsonify({
-        'success': False,
-        'error': '分析機能は廃止されました',
-        'message': '分析ダッシュボードはサポートされていません'
-    }), 503
+    """教員用分析ダッシュボード（GCSから読み込み）"""
+    unit = request.args.get('unit', '')
+    date = request.args.get('date', '')
     
+    logs = []
+    analysis_period = date if date else "全期間"
+    
+    try:
+        # 指定日付のログを読み込み（GCS優先）
+        if date:
+            print(f"[ANALYSIS] Loading logs for date={date}, unit={unit}")
+            logs = load_learning_logs(date)
+        else:
+            # 全期間の場合、最新30日分を処理
+            print(f"[ANALYSIS] Loading logs for all periods")
+            available_dates = get_available_log_dates()
+            target_dates = available_dates[:30]  # 最新30日
+            
+            for target_date in target_dates:
+                try:
+                    date_logs = load_learning_logs(target_date)
+                    if date_logs:
+                        logs.extend(date_logs)
+                    print(f"[ANALYSIS] Loaded {len(date_logs)} logs from {target_date}")
+                except Exception as e:
+                    print(f"[ANALYSIS] Error loading {target_date}: {e}")
+            
+            analysis_period = f"全期間（最新{len(target_dates)}日分）"
+        
+        print(f"[ANALYSIS] Total logs loaded: {len(logs)}")
+        
+        # 単元でフィルター
+        if unit:
+            logs = [log for log in logs if log.get('unit') == unit]
+            print(f"[ANALYSIS] Filtered to {len(logs)} logs for unit={unit}")
+        
+        # 簡易分析を実行
+        analysis_result = analyze_logs_simple(logs)
+        
+        return jsonify({
+            'success': True,
+            'date': date,
+            'analysis_period': analysis_period,
+            'unit': unit,
+            'analysis': analysis_result,
+            'log_count': len(logs)
+        })
+        
+    except Exception as e:
+        print(f"[ANALYSIS] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
+
+
+def analyze_logs_simple(logs):
+    """簡易ログ分析（GCSデータ対応、生成AIで傾向分析とプロンプト改善提案）"""
+    prediction_logs = [log for log in logs if log.get('log_type') == 'prediction_chat']
+    reflection_logs = [log for log in logs if log.get('log_type') == 'reflection_chat']
+    
+    result = {
+        'total_logs': len(logs),
+        'prediction_chats': len(prediction_logs),
+        'reflection_chats': len(reflection_logs),
+        'predictions_by_unit': {},
+        'reflections_by_unit': {},
+        'text_analysis': {},
+        'ai_insights': {}
+    }
+    
+    # 単元ごとに分類
+    for log in prediction_logs:
+        unit = log.get('unit', '不明')
+        if unit not in result['predictions_by_unit']:
+            result['predictions_by_unit'][unit] = []
+        
+        data = log.get('data', {})
+        result['predictions_by_unit'][unit].append({
+            'student': f"{log.get('class_num', 0)}_{log.get('seat_num', 0)}",
+            'user_message': data.get('user_message', ''),
+            'ai_response': data.get('ai_response', '')
+        })
+    
+    for log in reflection_logs:
+        unit = log.get('unit', '不明')
+        if unit not in result['reflections_by_unit']:
+            result['reflections_by_unit'][unit] = []
+        
+        data = log.get('data', {})
+        result['reflections_by_unit'][unit].append({
+            'student': f"{log.get('class_num', 0)}_{log.get('seat_num', 0)}",
+            'user_message': data.get('user_message', ''),
+            'ai_response': data.get('ai_response', '')
+        })
+    
+    # 単元ごとのテキスト分析とAI分析
+    for unit in result['predictions_by_unit']:
+        prediction_messages = [
+            p['user_message'] for p in result['predictions_by_unit'][unit] if p['user_message']
+        ]
+        reflection_messages = [
+            r['user_message'] for r in result.get('reflections_by_unit', {}).get(unit, [])
+            if r['user_message']
+        ]
+        
+        # テキスト統計分析
+        result['text_analysis'][unit] = {
+            'prediction': analyze_text(prediction_messages, unit),
+            'reflection': analyze_text(reflection_messages, unit)
+        }
+        
+        # 生成AIで傾向分析とプロンプト改善提案
+        try:
+            ai_analysis = generate_ai_insights(prediction_messages, reflection_messages, unit)
+            result['ai_insights'][unit] = ai_analysis
+        except Exception as e:
+            print(f"[AI_INSIGHTS] Error for {unit}: {e}")
+            result['ai_insights'][unit] = {
+                'error': str(e),
+                'trends': 'AI分析に失敗しました',
+                'prompt_suggestions': 'プロンプト提案を生成できませんでした'
+            }
+    
+    return result
+
+
+def generate_ai_insights(prediction_messages, reflection_messages, unit):
+    """生成AIで学習傾向を分析し、プロンプト改善提案を生成"""
+    try:
+        # サンプルデータを作成（最大20件ずつ）
+        pred_sample = prediction_messages[:20] if len(prediction_messages) > 20 else prediction_messages
+        refl_sample = reflection_messages[:20] if len(reflection_messages) > 20 else reflection_messages
+        
+        # プロンプトを構築
+        analysis_prompt = f"""以下は理科の単元「{unit}」における児童の予想と考察の記録です。
+
+【予想の記録】（{len(pred_sample)}件）
+{chr(10).join([f"{i+1}. {msg}" for i, msg in enumerate(pred_sample)])}
+
+【考察の記録】（{len(refl_sample)}件）
+{chr(10).join([f"{i+1}. {msg}" for i, msg in enumerate(refl_sample)])}
+
+これらの記録を分析して、以下の2点を簡潔に教えてください：
+
+1. **学習傾向**: 児童の思考パターンや理解度の特徴（200字以内）
+2. **プロンプト改善提案**: AIがより効果的な質問をするための具体的な改善案（300字以内）
+
+テキスト形式で、読みやすく箇条書きも含めて回答してください。"""
+
+        # OpenAI APIで分析
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "あなたは理科教育の専門家です。児童の学習ログから傾向を分析し、教育的な改善提案をします。"},
+                {"role": "user", "content": analysis_prompt}
+            ],
+            max_tokens=800,
+            temperature=0.7
+        )
+        
+        ai_response = response.choices[0].message.content.strip()
+        
+        return {
+            'trends': ai_response,
+            'prediction_count': len(prediction_messages),
+            'reflection_count': len(reflection_messages),
+            'sample_size': f"予想{len(pred_sample)}件、考察{len(refl_sample)}件を分析"
+        }
+        
+    except Exception as e:
+        print(f"[AI_INSIGHTS] Generation error: {e}")
+        raise
+    
 
 def analyze_text(messages, unit=None):
     """テキスト分析（キーワード、頻度、文字数、科学用語含有率など）"""
