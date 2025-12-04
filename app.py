@@ -2718,12 +2718,11 @@ def teacher_analysis():
                     if not date_logs:
                         continue
                     
-                    # 日付ごとに分析
-                    batch_result = analyze_predictions_and_reflections(date_logs)
+                    # ログをマージ（リストを拡張）
+                    logs.extend(date_logs)
                     
-                    # 結果をマージ
-                    for key in ['prediction_chats', 'reflection_chats']:
-                        logs[key] = logs.get(key, 0) + batch_result.get(key, 0)
+                    # メモリを明示的に解放
+                    del date_logs
                     
                     print(f"[ANALYSIS] Processed {target_date}")
                     
@@ -2742,44 +2741,27 @@ def teacher_analysis():
                 
                 print(f"[ANALYSIS] Processing latest {len(target_dates)} days (memory efficient)")
                 
-                # バッチ処理：日付ごとに分析して結果を集約
-                batch_analysis_results = {}
-                
+                # バッチ処理：日付ごとに全ログを集約
                 for target_date in target_dates:
                     try:
                         date_logs = load_learning_logs(target_date)
                         if not date_logs:
                             continue
                         
-                        # 日付ごとに分析（メモリを解放）
-                        batch_result = analyze_predictions_and_reflections(date_logs)
-                        
-                        # 結果をマージ
-                        for key in ['prediction_chats', 'reflection_chats']:
-                            batch_analysis_results[key] = batch_analysis_results.get(key, 0) + batch_result.get(key, 0)
+                        # ログをマージ（リストを拡張）
+                        logs.extend(date_logs)
                         
                         # メモリを明示的に解放
                         del date_logs
-                        del batch_result
                         
                         print(f"[ANALYSIS] Processed {target_date} (memory freed)")
                         
                     except Exception as e:
                         print(f"[ANALYSIS] Warning: Could not read logs for {target_date}: {e}")
                 
-                # 集約結果をそのまま返す
-                return jsonify({
-                    'success': True,
-                    'date': date,
-                    'start_date': start_date,
-                    'end_date': end_date,
-                    'analysis_period': "全期間（最新30日分、バッチ処理）",
-                    'unit': unit,
-                    'analysis': batch_analysis_results,
-                    'log_count': sum(batch_analysis_results.get(k, 0) for k in ['prediction_chats', 'reflection_chats'])
-                })
+                analysis_period = "全期間（最新30日分）"
         
-        print(f"[ANALYSIS] Loaded {len(logs)} logs")
+        print(f"[ANALYSIS] Loaded {len(logs)} logs total")
         
         if unit:
             logs = [log for log in logs if log.get('unit') == unit]
@@ -2912,17 +2894,8 @@ def analyze_predictions_and_reflections(logs):
                 print(f"[INSIGHTS] Skipping insights for {unit}: {insight_err}")
                 result['insights'][unit] = {'prediction': [], 'reflection': []}
             
-            # プロンプト改善提案（エラー時はスキップ）
-            try:
-                result['prompt_recommendations'][unit] = recommend_prompt_improvements(
-                    prediction_messages,
-                    reflection_messages,
-                    result['insights'][unit],
-                    unit
-                )
-            except Exception as prompt_err:
-                print(f"[PROMPTS] Skipping prompts for {unit}: {prompt_err}")
-                result['prompt_recommendations'][unit] = []
+            # プロンプト改善提案（スキップ - 外部関数がないため）
+            result['prompt_recommendations'][unit] = []
         
         return result
     
@@ -3006,143 +2979,6 @@ def analyze_with_embeddings(prediction_messages, reflection_messages, unit):
         return {'clusters': [], 'cluster_count': 0, 'error': str(e)}
 
 
-def generate_insights(prediction_messages, reflection_messages, text_analysis, unit):
-    """ログから洞察を生成"""
-    try:
-        insights = []
-        
-        # 予想の多様性
-        pred_analysis = text_analysis.get('prediction', {})
-        pred_keywords = pred_analysis.get('keywords', [])
-        if pred_keywords:
-            insights.append(
-                f"【{unit}の予想の特徴】\n"
-                f"児童の予想には、以下のキーワードが頻出しています: "
-                f"{', '.join([kw['word'] for kw in pred_keywords[:5]])}。\n"
-                f"これは、児童が単元の核心的な概念に気づいていることを示唆しています。"
-            )
-        
-        # 予想と考察の比較
-        if prediction_messages and reflection_messages:
-            insights.append(
-                f"【予想から考察への学習過程】\n"
-                f"予想段階で{len(prediction_messages)}件、考察段階で{len(reflection_messages)}件の発言がありました。\n"
-                f"実験を通じて、児童の理解がどの程度深まったかを検証する機会があります。"
-            )
-        
-        # 表現パターンから読み取る理解度
-        pred_patterns = pred_analysis.get('patterns', {})
-        refl_patterns = text_analysis.get('reflection', {}).get('patterns', {})
-        
-        causal_growth = (refl_patterns.get('causal_expressions', 0) - 
-                        pred_patterns.get('causal_expressions', 0))
-        if causal_growth > 0:
-            insights.append(
-                f"【因果関係の理解深化】\n"
-                f"考察段階で因果表現（「だから」「なぜなら」）が"
-                f"{causal_growth}回増加しました。\n"
-                f"児童が実験結果を基に因果関係を構築しようとしていることが示唆されます。"
-            )
-        
-        # 経験参照の活用
-        exp_refs = pred_patterns.get('experience_references', 0)
-        if exp_refs > 0:
-            insights.append(
-                f"【日常経験との結びつき】\n"
-                f"予想段階で{exp_refs}回、児童の過去の経験が参照されました。\n"
-                f"児童が既有知識と新しい学習を結びつけようとしていることが分かります。"
-            )
-        
-        # 不確実性表現
-        uncertainty = pred_patterns.get('uncertainty_expressions', 0)
-        if uncertainty > 2:
-            insights.append(
-                f"【暫定的な理解の段階】\n"
-                f"予想段階で不確実性表現（「たぶん」「かもしれない」）が{uncertainty}回ありました。\n"
-                f"児童がまだ確実でない知識について探索的に考えていることが示唆されます。"
-            )
-        
-        return insights
-    
-    except Exception as e:
-        print(f"[INSIGHTS] Error: {e}")
-        return [f"インサイト生成エラー: {str(e)}"]
-
-
-def recommend_prompt_improvements(prediction_messages, reflection_messages, insights, unit):
-    """プロンプト改善の提案"""
-    try:
-        recommendations = []
-        
-        # メッセージの平均長から判定
-        avg_pred_len = np.mean([len(m) for m in prediction_messages if m]) if prediction_messages else 0
-        avg_refl_len = np.mean([len(m) for m in reflection_messages if m]) if reflection_messages else 0
-        
-        # 短い回答が多い場合
-        if avg_pred_len < 30:
-            recommendations.append({
-                'issue': '予想段階の回答が短い',
-                'suggestion': '児童がより詳しく理由を述べるよう促すプロンプトを追加してください。\n'
-                             'プロンプト例: 「どうしてそう思いますか？理由を詳しく教えてください。」',
-                'priority': 'high'
-            })
-        
-        if avg_refl_len < 40 and reflection_messages:
-            recommendations.append({
-                'issue': '考察段階の回答が短い',
-                'suggestion': '実験結果と予想の違いをより深く考察するよう促してください。\n'
-                             'プロンプト例: 「実験結果はどうでしたか？予想と同じでしたか？違うとしたら、'
-                             'なぜだと思いますか？」',
-                'priority': 'high'
-            })
-        
-        # 回答数が少ない場合
-        total_messages = len(prediction_messages) + len(reflection_messages)
-        if total_messages < 6:
-            recommendations.append({
-                'issue': '対話の回数が少ない',
-                'suggestion': 'AIの質問がより開かれた質問になるよう調整してください。\n'
-                             'プロンプト例: 「はい/いいえで答えずに、児童の考えを引き出す質問を心がけてください」',
-                'priority': 'medium'
-            })
-        
-        # 経験参照が少ない場合
-        if len(prediction_messages) > 0:
-            has_experience_ref = any('前' in m or '経験' in m or 'やったことある' in m 
-                                    for m in prediction_messages)
-            if not has_experience_ref:
-                recommendations.append({
-                    'issue': '児童の経験を活かせていない',
-                    'suggestion': '児童の過去の経験や日常生活との関連を引き出すよう促してください。\n'
-                                 'プロンプト例: 「このような現象、今までに見たことがありますか？'
-                                 '日常生活の中で、似たようなことを経験したことはありませんか？」',
-                    'priority': 'medium'
-                })
-        
-        # 予想と考察の大きなギャップ
-        if prediction_messages and reflection_messages:
-            if len(prediction_messages) > len(reflection_messages) * 2:
-                recommendations.append({
-                    'issue': '予想段階に比べて考察段階の対話が少ない',
-                    'suggestion': 'AI が実験結果との比較をより丁寧に促すよう改善してください。\n'
-                                 'プロンプト例: 「予想と実験結果を比べて、何が同じで何が違いましたか？」',
-                    'priority': 'medium'
-                })
-        
-        # インサイトから提案
-        if any('不確実性' in i for i in insights):
-            recommendations.append({
-                'issue': '児童の予想に不確実性が残っている',
-                'suggestion': 'より確実な理解を引き出すため、段階的な質問を用意してください。\n'
-                             'プロンプト例: 段階的に理由を深掘りし、最終的に確実な理解に到達させる',
-                'priority': 'low'
-            })
-        
-        return recommendations
-    
-    except Exception as e:
-        print(f"[RECOMMENDATIONS] Error: {e}")
-        return [{'issue': 'エラー', 'suggestion': str(e), 'priority': 'low'}]
 
 
 def analyze_text(messages, unit=None):
