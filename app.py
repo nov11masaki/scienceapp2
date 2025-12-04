@@ -1244,35 +1244,41 @@ def load_learning_logs(date=None):
         return []
 
 def get_available_log_dates():
-    """利用可能な全ログの日付リストを取得（GCS優先）"""
-    import glob
-    import os
-    
+    """利用可能な全ログの日付リストを取得（GCS優先、メモリ効率重視）"""
     dates = set()
     
-    # GCSから取得（本番環境）
+    # GCSから取得（本番環境、メモリ効率的に）
     if USE_GCS and bucket:
         try:
             print(f"[DATES] Checking GCS bucket for log files...")
-            blobs = bucket.list_blobs(prefix='logs/learning_log_')
-            for blob in blobs:
+            # ページネーションを使用して段階的に処理（メモリ効率化）
+            page_iterator = bucket.list_blobs(prefix='logs/learning_log_', page_size=50)
+            blob_count = 0
+            for blob in page_iterator:
+                blob_count += 1
+                if blob_count > 1000:  # 最大 1000 ブロブまでに制限
+                    print(f"[DATES] Reached limit of 1000 blobs, stopping enumeration")
+                    break
+                
                 filename = os.path.basename(blob.name)
                 if filename.startswith('learning_log_') and filename.endswith('.json'):
                     date_str = filename[13:-5]  # learning_log_YYYYMMDD.json
                     if len(date_str) == 8 and date_str.isdigit():
                         dates.add(date_str)
-            print(f"[DATES] Found {len(dates)} dates in GCS")
+            print(f"[DATES] Found {len(dates)} dates in GCS (scanned {blob_count} blobs)")
         except Exception as e:
-            print(f"[DATES] GCS ERROR: {str(e)}")
+            print(f"[DATES] GCS ERROR: {str(e)}, falling back to local")
     
-    # ローカルファイルも確認（開発環境用）
-    log_files = glob.glob("logs/learning_log_*.json")
-    for file in log_files:
-        filename = os.path.basename(file)
-        if filename.startswith('learning_log_') and filename.endswith('.json'):
-            date_str = filename[13:-5]
-            if len(date_str) == 8 and date_str.isdigit():
-                dates.add(date_str)
+    # ローカルファイルも確認（開発環境用、フォールバック）
+    if len(dates) == 0:
+        log_files = glob.glob("logs/learning_log_*.json")
+        for file in log_files:
+            filename = os.path.basename(file)
+            if filename.startswith('learning_log_') and filename.endswith('.json'):
+                date_str = filename[13:-5]
+                if len(date_str) == 8 and date_str.isdigit():
+                    dates.add(date_str)
+        print(f"[DATES] Fallback: Found {len(dates)} dates in local")
     
     dates_list = sorted(list(dates), reverse=True)  # 新しい順
     print(f"[DATES] Total found {len(dates_list)} log dates: {dates_list[:5]}")
@@ -1795,7 +1801,7 @@ def chat():
         
         # JSON形式のレスポンスの場合は解析して純粋なメッセージを抽出
         ai_message = extract_message_from_json_response(ai_response)
-        
+
         # 予想・考察段階ではマークダウン除去をスキップ（MDファイルのプロンプトに従う）
         # ai_message = remove_markdown_formatting(ai_message)
         
@@ -1912,9 +1918,7 @@ def summary():
         "以下の会話内容のみをもとに、児童の話した言葉や順序を活かして予想をまとめてください。"
         "児童が自分のノートにそのまま写せる、短い1〜2文にしてください。"
         "【絶対ルール】児童が言った言葉だけを使ってください。言い換え・言い足しは絶対にしないでください。"
-        "「〜と思う。なぜなら〜。」の形で、むずかしい言い回しや第三者目線（例:「児童は〜」）は使わないでください。"
-        "理由は児童が話した経験や具体的な様子のみを書き、結論を言い換えただけの理由（例:「体積が大きくなるのは体積がふくらむから」）は書かないでください。"
-        "会話に含まれていない内容や新しい事実は追加しないでください。"
+        "児童の気づきや学習の進展を重視してください。会話に含まれていない内容や新しい事実は追加しないでください。"
     )
     
     # メッセージフォーマットで構築
@@ -2050,7 +2054,6 @@ def job_status(job_id):
             return jsonify({'status': 'unknown'})
     
     except Exception as e:
-        print(f"[JOB_STATUS] Error fetching job {job_id}: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/sync-session', methods=['POST'])
@@ -2123,6 +2126,9 @@ def _save_summary_to_db(student_id, unit, stage, summary_text):
         _save_summary_local(student_id, unit, stage, summary_text)
         print(f"[SUMMARY_SAVE] Local - {student_id}_{unit}_{stage}")
     except Exception as e:
+        print(f"[SUMMARY_SAVE] Local failed: {e}")
+
+def _save_summary_local(student_id, unit, stage, summary_text):
         print(f"[SUMMARY_SAVE] Local failed: {e}")
 
 def _save_summary_local(student_id, unit, stage, summary_text):
@@ -3172,14 +3178,16 @@ def teacher_analysis():
             
             analysis_period = f"{start_date} to {end_date}"
         else:
-            # 全期間 - GCS優先で読み込み
+            # 全期間 - GCS優先で読み込み（メモリ効率重視）
             print(f"[ANALYSIS] Loading logs for all periods, unit={unit}")
             
-            # GCSから全利用可能ログを読み込み
+            # GCSから全利用可能ログを読み込み（最新100日分に制限）
             available_dates = get_available_log_dates()
-            print(f"[ANALYSIS] Found {len(available_dates)} available log dates")
+            # メモリ効率化: 最新100日分のみ処理
+            target_dates = available_dates[:100]
+            print(f"[ANALYSIS] Found {len(available_dates)} available log dates, processing latest {len(target_dates)}")
             
-            for target_date in available_dates:
+            for target_date in target_dates:
                 try:
                     date_logs = load_learning_logs(target_date)
                     if date_logs:
@@ -3188,7 +3196,7 @@ def teacher_analysis():
                 except Exception as e:
                     print(f"[ANALYSIS] Warning: Could not read logs for {target_date}: {e}")
             
-            analysis_period = "全期間"
+            analysis_period = "全期間（最新100日分）"
         
         print(f"[ANALYSIS] Loaded {len(logs)} logs")
         
