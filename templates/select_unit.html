@@ -110,6 +110,26 @@ const unitProgress = unitProgressElement ? JSON.parse(unitProgressElement.textCo
 
 // 5組かどうかをグローバルに判定
 const isClass5 = classNumber === '5';
+const isClass1 = classNumber === '1';
+
+// アクセス可能な単元を判定する関数
+function canAccessUnit(unit) {
+    // 1組限定単元の定義
+    const class1OnlyUnits = {
+        '金属の温度と体積': true
+    };
+    
+    if (isClass5) {
+        // 5組は全員すべてのユニットを利用可能
+        return true;
+    } else if (isClass1) {
+        // 1組は1組限定単元を含むすべてを利用可能
+        return true;
+    } else {
+        // その他のクラスは1組限定単元以外を利用可能
+        return !class1OnlyUnits[unit];
+    }
+}
 
 // 進行状況に基づいてボタンを有効/無効化
 function updateButtons() {
@@ -117,41 +137,28 @@ function updateButtons() {
     // 予想ボタンの有効/無効
     document.querySelectorAll('.unit-prediction-btn').forEach((btn) => {
         const unit = btn.getAttribute('data-unit');
+        const accessible = canAccessUnit(unit);
         
-        if (isClass5) {
-            // 5組は全員すべてのユニットを利用可能
+        if (accessible) {
             btn.disabled = false;
             btn.title = '';
         } else {
-            // 5組以外は「空気の温度と体積」のみ有効
-            if (unit === '空気の温度と体積') {
-                btn.disabled = false;
-                btn.title = '';
-            } else {
-                btn.disabled = true;
-                btn.title = '現在このユニットは利用できません';
-            }
+            btn.disabled = true;
+            btn.title = '現在このユニットは利用できません';
         }
     });
     
     // 考察ボタンの有効/無効
     document.querySelectorAll('[id^="reflection-btn-"]').forEach((btn) => {
         const unit = btn.getAttribute('data-unit');
-        const progress = unitProgress[unit];
+        const accessible = canAccessUnit(unit);
         
-        if (isClass5) {
-            // 5組は考察可能（予想完了不要）
+        if (accessible) {
             btn.disabled = false;
             btn.title = '';
         } else {
-            // 5組以外は「空気の温度と体積」のみ
-            if (unit === '空気の温度と体積') {
-                btn.disabled = false;
-                btn.title = '';
-            } else {
-                btn.disabled = true;
-                btn.title = '現在このユニットは利用できません';
-            }
+            btn.disabled = true;
+            btn.title = '現在このユニットは利用できません';
         }
     });
 }
@@ -161,8 +168,8 @@ document.addEventListener('DOMContentLoaded', updateButtons);
 
 function goToPrediction(unit) {
     // ボタンが無効な場合は処理しない
-    if (!isClass5 && unit !== '空気の温度と体積') {
-        alert('現在このユニットは利用できません');
+    if (!canAccessUnit(unit)) {
+        alert('申し訳ありません。このユニットはアクセスできません。');
         return;
     }
     
@@ -186,8 +193,8 @@ function goToPrediction(unit) {
 
 function goToReflection(unit) {
     // ボタンが無効な場合は処理しない
-    if (!isClass5 && unit !== '空気の温度と体積') {
-        alert('現在このユニットは利用できません');
+    if (!canAccessUnit(unit)) {
+        alert('申し訳ありません。このユニットはアクセスできません。');
         return;
     }
     
