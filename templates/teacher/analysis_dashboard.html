@@ -55,6 +55,13 @@
                     <p id="reflectionCount">0</p>
                 </div>
             </div>
+            <div class="stat-card">
+                <div class="stat-icon"><i class="fas fa-flask"></i></div>
+                <div class="stat-content">
+                    <h3>理科用語含有率</h3>
+                    <p id="scienceTermRatio">-</p>
+                </div>
+            </div>
         </div>
 
         <!-- 単元別分析 -->
@@ -134,6 +141,18 @@ function displayAnalysis(analysis) {
     document.getElementById('totalChats').textContent = analysis.total_logs;
     document.getElementById('predictionCount').textContent = analysis.prediction_chats;
     document.getElementById('reflectionCount').textContent = analysis.reflection_chats;
+    
+    // 平均理科用語含有率を計算
+    let totalScienceTermRatio = 0;
+    let unitCount = 0;
+    for (const [unit, analysis_data] of Object.entries(analysis.text_analysis || {})) {
+        if (analysis_data.prediction && analysis_data.prediction.science_term_ratio) {
+            totalScienceTermRatio += analysis_data.prediction.science_term_ratio;
+            unitCount++;
+        }
+    }
+    const avgRatio = unitCount > 0 ? (totalScienceTermRatio / unitCount).toFixed(1) : '-';
+    document.getElementById('scienceTermRatio').textContent = avgRatio + '%';
 
     // 予想段階の分析を表示
     displayPredictionAnalysis(analysis.predictions_by_unit, analysis.text_analysis);
@@ -169,6 +188,18 @@ function displayPredictionAnalysis(predictionsByUnit, textAnalysis) {
                     <div class="metric">
                         <label>最大文字数:</label>
                         <span>${unitAnalysis.max_length || 0}</span>
+                    </div>
+                    <div class="metric science-metric">
+                        <label>理科用語含有率:</label>
+                        <span>${(unitAnalysis.science_term_ratio || 0).toFixed(1)}%</span>
+                    </div>
+                </div>
+                <div class="science-terms-section">
+                    <h4>検出された理科用語:</h4>
+                    <div class="science-terms-list">
+                        ${(unitAnalysis.science_terms || []).map(term =>
+                            `<span class="science-term-tag">${term}</span>`
+                        ).join('')}
                     </div>
                 </div>
                 <div class="keywords-section">
@@ -235,6 +266,18 @@ function displayReflectionAnalysis(reflectionsByUnit, textAnalysis) {
                     <div class="metric">
                         <label>最大文字数:</label>
                         <span>${unitAnalysis.max_length || 0}</span>
+                    </div>
+                    <div class="metric science-metric">
+                        <label>理科用語含有率:</label>
+                        <span>${(unitAnalysis.science_term_ratio || 0).toFixed(1)}%</span>
+                    </div>
+                </div>
+                <div class="science-terms-section">
+                    <h4>検出された理科用語:</h4>
+                    <div class="science-terms-list">
+                        ${(unitAnalysis.science_terms || []).map(term =>
+                            `<span class="science-term-tag">${term}</span>`
+                        ).join('')}
                     </div>
                 </div>
                 <div class="keywords-section">
@@ -438,6 +481,36 @@ function escapeHtml(text) {
     font-size: 1.5rem;
     font-weight: bold;
     color: #333;
+}
+
+/* 理科用語メトリック */
+.science-metric span {
+    color: #e74c3c;
+    font-weight: 700;
+}
+
+/* 理科用語セクション */
+.science-terms-section h4,
+.keywords-section h4,
+.patterns-section h4 {
+    margin: 15px 0 10px 0;
+    color: #333;
+}
+
+.science-terms-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.science-term-tag {
+    background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+    color: white;
+    padding: 5px 10px;
+    border-radius: 15px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    box-shadow: 0 2px 4px rgba(231, 76, 60, 0.3);
 }
 
 /* キーワード */

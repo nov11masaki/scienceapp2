@@ -20,6 +20,9 @@ from pathlib import Path
 from functools import lru_cache, wraps
 from werkzeug.utils import secure_filename
 
+# 分析モジュールをインポート
+from tools.analysis import analyze_all_conversations, generate_text_analysis, SCIENCE_TERMS, VOCABULARY_MAPPING
+
 # Optional analysis libraries (may not be available in all environments)
 try:
     import numpy as np
@@ -3198,9 +3201,10 @@ def analyze_predictions_and_reflections(logs):
                 if r['user_message']
             ]
             
+            # 科学用語分析を含むテキスト分析
             result['text_analysis'][unit] = {
-                'prediction': analyze_text(prediction_messages),
-                'reflection': analyze_text(reflection_messages)
+                'prediction': analyze_text(prediction_messages, unit),
+                'reflection': analyze_text(reflection_messages, unit)
             }
             
             # 埋め込み + クラスタリング分析（エラー時はスキップ）
@@ -3472,14 +3476,16 @@ def recommend_prompt_improvements(prediction_messages, reflection_messages, insi
         return [{'issue': 'エラー', 'suggestion': str(e), 'priority': 'low'}]
 
 
-def analyze_text(messages):
-    """テキスト分析（キーワード、頻度、文字数など）"""
+def analyze_text(messages, unit=None):
+    """テキスト分析（キーワード、頻度、文字数、科学用語含有率など）"""
     if not messages:
         return {
             'total_messages': 0,
             'average_length': 0,
             'keywords': [],
-            'common_patterns': []
+            'common_patterns': [],
+            'science_term_ratio': 0.0,
+            'science_terms': []
         }
     
     try:
@@ -3492,13 +3498,23 @@ def analyze_text(messages):
         # 一般的なパターン検出
         patterns = detect_patterns(messages)
         
+        # 科学用語分析（単元指定がある場合）
+        science_term_ratio = 0.0
+        science_terms_found = []
+        if unit and unit in SCIENCE_TERMS:
+            from tools.analysis import calculate_science_term_ratio
+            full_text = " ".join(messages)
+            science_term_ratio, science_terms_found = calculate_science_term_ratio(full_text, unit)
+        
         return {
             'total_messages': len(messages),
             'average_length': sum(message_lengths) / len(message_lengths) if message_lengths else 0,
             'max_length': max(message_lengths) if message_lengths else 0,
             'min_length': min(message_lengths) if message_lengths else 0,
             'keywords': keywords[:10],  # トップ10
-            'patterns': patterns
+            'patterns': patterns,
+            'science_term_ratio': round(science_term_ratio, 2),
+            'science_terms': science_terms_found[:15]  # トップ15
         }
     
     except Exception as e:
