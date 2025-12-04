@@ -27,7 +27,8 @@ from tools.analysis import (
     SCIENCE_TERMS, 
     VOCABULARY_MAPPING,
     generate_insights,
-    cluster_and_analyze_conversations
+    cluster_and_analyze_conversations,
+    get_text_embedding
 )
 
 # Optional analysis libraries (may not be available in all environments)

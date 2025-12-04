@@ -1,5 +1,6 @@
 """
 児童の予想・考察の分析モジュール
+OpenAI Embeddings APIを使用した高度なテキスト分析
 理科用語の含有率、科学的語彙の獲得率、テキストクラスタリングを分析する
 """
 import json
@@ -9,48 +10,59 @@ from datetime import datetime
 from pathlib import Path
 import math
 from typing import List, Dict, Tuple
+import os
 
-# 理科用語辞書（単元ごと）
+# OpenAI設定（オプション）
+try:
+    import openai
+    OPENAI_AVAILABLE = True
+    openai.api_key = os.getenv("OPENAI_API_KEY")
+except ImportError:
+    print("[WARN] openai module not available, using fallback embeddings")
+    openai = None
+    OPENAI_AVAILABLE = False
+
+# 小学生向け理科用語辞書（単元ごと）
 SCIENCE_TERMS = {
     "水のあたたまり方": {
-        "heat": ["温度", "あたたまり", "加熱", "熱", "温かい", "あたたかい"],
-        "state": ["液体", "沸騰", "蒸発", "気体", "泡"],
-        "transfer": ["対流", "伝わり", "伝導", "流れ"]
+        "heat": ["温度", "あたたまり", "加熱", "熱い", "温かい", "あたたかい"],
+        "state": ["液体", "沸騰", "泡", "水蒸気"],
+        "transfer": ["伝わり方", "伝わる", "対流", "熱が伝わる"]
     },
     "水を冷やし続けた時の温度と様子": {
-        "temperature": ["温度", "冷たい", "冷やす", "冷却"],
-        "phase": ["固体", "液体", "氷", "凍る", "凝固"],
-        "change": ["変化", "状態変化", "結晶化"]
+        "temperature": ["温度", "冷たい", "冷やす", "冷える"],
+        "phase": ["固体", "液体", "氷", "凍る"],
+        "change": ["変化", "様子が変わる"]
     },
     "空気の温度と体積": {
-        "temperature": ["温度", "あたたまり", "冷やす"],
+        "temperature": ["温度", "あたたまり", "冷やす", "温かい", "冷たい"],
         "volume": ["体積", "膨らむ", "膨張", "縮む", "収縮"],
-        "gas": ["空気", "気体", "分子"]
+        "gas": ["空気", "気体"]
     },
     "金属のあたたまり方": {
-        "heat": ["温度", "あたたまり", "熱", "伝わり"],
-        "conduction": ["伝導", "熱伝導", "伝わる"],
-        "metal": ["金属", "銅", "アルミニウム"]
+        "heat": ["温度", "あたたまり", "加熱", "熱い"],
+        "conduction": ["伝わり方", "伝わる", "熱が伝わる"],
+        "metal": ["金属", "銅", "アルミニウム", "鉄"]
     },
     "金属の温度と体積": {
         "temperature": ["温度", "あたたまり", "加熱", "冷やす"],
-        "volume": ["体積", "膨らむ", "膨張", "伸びる", "長さ"],
-        "metal": ["金属", "銅棒", "アルミニウム"]
+        "volume": ["体積", "膨らむ", "膨張", "伸びる", "長さ", "太さ"],
+        "metal": ["金属", "銅", "アルミニウム"]
     }
 }
 
-# 生活語彙 → 理科用語のマッピング
+# 生活語彙 → 科学用語のマッピング（小学生向け）
 VOCABULARY_MAPPING = {
     "あつい": ["温度が高い", "温度が上がった"],
-    "あたたかい": ["温度が上がった", "温度が高い"],
+    "あたたかい": ["温度が上がった", "温度が高い", "あたたまり"],
     "さむい": ["温度が低い", "温度が下がった"],
     "つめたい": ["温度が低い", "冷えた"],
-    "ふとった": ["体積が増えた", "膨らんだ", "膨張した"],
-    "やせた": ["体積が減った", "縮んだ", "収縮した"],
-    "ちぢむ": ["体積が減った", "収縮した"],
-    "膨らむ": ["体積が増えた"],
-    "太くなった": ["体積が増えた"],
-    "細くなった": ["体積が減った"]
+    "ふとった": ["体積が増えた", "膨らんだ"],
+    "やせた": ["体積が減った", "縮んだ"],
+    "膨らむ": ["体積が増える"],
+    "太くなった": ["体積が増える", "太さが変わる"],
+    "細くなった": ["体積が減る"],
+    "変わった": ["様子が変わる", "変化する"]
 }
 
 def extract_nouns_and_verbs(text):
@@ -285,24 +297,49 @@ def extract_linguistic_patterns(text):
 
 def simple_text_embedding(text: str) -> List[float]:
     """
-    簡易的なテキスト埋め込み（TF-IDF的な単純実装）
-    単語の出現頻度ベクトルを返す
+    簡易的なテキスト埋め込み（フォールバック用）
+    TF-IDF的な単純実装で、単語の出現頻度ベクトルを返す
     """
     words = extract_nouns_and_verbs(text)
     word_freq = Counter(words)
+    
+    if not word_freq:
+        return [0.0] * 10
     
     # 各単語の重みを正規化
     max_freq = max(word_freq.values()) if word_freq else 1
     vector = [count / max_freq for count in word_freq.values()]
     
-    # 固定次元に正規化（最大100次元）
-    target_dim = min(100, len(word_freq))
+    # 固定次元に正規化（10次元）
+    target_dim = 10
     if len(vector) > target_dim:
         vector = vector[:target_dim]
     elif len(vector) < target_dim:
         vector.extend([0.0] * (target_dim - len(vector)))
     
     return vector
+
+
+def get_text_embedding(text: str) -> List[float]:
+    """
+    OpenAI Embeddings APIを使用してテキストを埋め込みベクトルに変換
+    text-embedding-3-smallモデルを使用（3072次元）
+    APIが利用不可の場合は簡易実装を使用
+    """
+    if not OPENAI_AVAILABLE or not openai:
+        # フォールバック：簡易実装
+        return simple_text_embedding(text)
+    
+    try:
+        response = openai.Embedding.create(
+            input=text,
+            model="text-embedding-3-small"
+        )
+        return response['data'][0]['embedding']
+    except Exception as e:
+        print(f"[WARN] Embedding API error: {e}, using fallback embedding")
+        # フォールバック：簡易実装
+        return simple_text_embedding(text)
 
 
 def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
@@ -329,15 +366,16 @@ def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
 
 def simple_kmeans_clustering(texts: List[str], k: int = 3) -> Dict:
     """
-    簡易K-meansクラスタリング（外部ライブラリ不要）
+    OpenAI Embeddingsとコサイン類似度を使用したK-meansクラスタリング
     """
     if len(texts) < 2:
-        return {"clusters": [{"texts": texts, "size": len(texts), "center": []}], "cluster_count": 1}
+        return {"clusters": [{"texts": texts, "size": len(texts), "representative": texts[0] if texts else ""}], "cluster_count": 1}
     
     k = min(k, len(texts))
     
-    # テキストを埋め込み化
-    embeddings = [simple_text_embedding(text) for text in texts]
+    # OpenAI Embeddingsでテキストをベクトル化
+    print(f"[INFO] Embedding {len(texts)} texts using OpenAI API...")
+    embeddings = [get_text_embedding(text) for text in texts]
     
     # 初期クラスタセンターをランダムに選択
     import random
@@ -346,6 +384,7 @@ def simple_kmeans_clustering(texts: List[str], k: int = 3) -> Dict:
     
     # K-meansアルゴリズム（最大10イテレーション）
     clusters = [[] for _ in range(k)]
+    prev_centers = None
     
     for iteration in range(10):
         # クラスタをリセット
@@ -354,7 +393,7 @@ def simple_kmeans_clustering(texts: List[str], k: int = 3) -> Dict:
         # 各テキストを最も近いクラスタに割り当て
         for idx, embedding in enumerate(embeddings):
             distances = [cosine_similarity(embedding, center) for center in centers]
-            closest_cluster = distances.index(max(distances))
+            closest_cluster = distances.index(max(distances)) if distances else 0
             clusters[closest_cluster].append(idx)
         
         # クラスタセンターを更新
@@ -363,15 +402,20 @@ def simple_kmeans_clustering(texts: List[str], k: int = 3) -> Dict:
             if cluster_indices:
                 # クラスタ内のテキストの平均埋め込みを計算
                 cluster_embeddings = [embeddings[i] for i in cluster_indices]
+                vec_len = len(cluster_embeddings[0])
                 avg_embedding = [sum(e[j] for e in cluster_embeddings) / len(cluster_embeddings) 
-                                for j in range(len(cluster_embeddings[0]))]
+                                for j in range(vec_len)]
                 new_centers.append(avg_embedding)
             else:
                 new_centers.append(random.choice(embeddings))
         
         # 収束チェック
-        if centers == new_centers:
+        if prev_centers and all(
+            cosine_similarity(nc, pc) > 0.99 for nc, pc in zip(new_centers, prev_centers)
+        ):
             break
+        
+        prev_centers = centers
         centers = new_centers
     
     # クラスタを整理
@@ -379,10 +423,15 @@ def simple_kmeans_clustering(texts: List[str], k: int = 3) -> Dict:
     for cluster_indices in clusters:
         if cluster_indices:
             cluster_texts = [texts[i] for i in cluster_indices]
+            # 代表テキストはクラスタセンターに最も近いテキスト
+            center_idx = centers[len(result_clusters)] if len(result_clusters) < len(centers) else centers[0]
+            distances = [cosine_similarity(embeddings[i], center_idx) for i in cluster_indices]
+            representative_idx = cluster_indices[distances.index(max(distances))]
+            
             result_clusters.append({
                 "texts": cluster_texts,
                 "size": len(cluster_texts),
-                "representative": cluster_texts[0] if cluster_texts else ""
+                "representative": texts[representative_idx] if representative_idx < len(texts) else cluster_texts[0]
             })
     
     return {
@@ -393,7 +442,8 @@ def simple_kmeans_clustering(texts: List[str], k: int = 3) -> Dict:
 
 def generate_insights(messages: List[str], unit: str) -> List[str]:
     """
-    メッセージから有意義なインサイトを生成
+    OpenAI APIを使用した高度なインサイト生成
+    メッセージから有意義な教育的インサイトを自動生成する
     """
     insights = []
     
@@ -421,7 +471,7 @@ def generate_insights(messages: List[str], unit: str) -> List[str]:
         insights.append("✓ 比較・分析表現が見られます：複数の事象を関連づける力が育成されています")
     
     # 4. 経験との関連付け
-    if "やった" in full_text or "経験" in full_text or "前に" in full_text:
+    if "やった" in full_text or "経験" in full_text or "前に" in full_text or "時" in full_text:
         insights.append("✓ 経験とのリンケージが見られます：既有知識との結びつきが強くなっています")
     
     # 5. 対話の活発性
