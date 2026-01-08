@@ -88,6 +88,23 @@
         </div>
     </div>
 </div>
+
+<style>
+    /* ボタン無効化時のスタイル */
+    .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        background-color: #6c757d !important;
+        border-color: #6c757d !important;
+        color: #fff !important;
+    }
+    
+    .btn:disabled:hover {
+        background-color: #6c757d !important;
+        border-color: #6c757d !important;
+    }
+</style>
+
 {% endblock %}
 
 {% block scripts %}
@@ -114,19 +131,31 @@ const isClass1 = classNumber === '1';
 
 // アクセス可能な単元を判定する関数
 function canAccessUnit(unit) {
+    // 無効化する単元リスト
+    const disabledUnits = {
+        '空気の温度と体積': true,
+        '金属の温度と体積': true,
+        '水を冷やし続けた時の温度と様子': true
+    };
+    
+    // 無効化単元はアクセス不可
+    if (disabledUnits[unit]) {
+        return false;
+    }
+    
     // 1組限定単元の定義
     const class1OnlyUnits = {
-        '金属の温度と体積': true
+        // 他の1組限定単元があればここに追加
     };
     
     if (isClass5) {
-        // 5組は全員すべてのユニットを利用可能
+        // 5組は全員すべてのユニットを利用可能（無効化単元除く）
         return true;
     } else if (isClass1) {
-        // 1組は1組限定単元を含むすべてを利用可能
+        // 1組は1組限定単元を含むすべてを利用可能（無効化単元除く）
         return true;
     } else {
-        // その他のクラスは1組限定単元以外を利用可能
+        // その他のクラスは1組限定単元以外を利用可能（無効化単元除く）
         return !class1OnlyUnits[unit];
     }
 }

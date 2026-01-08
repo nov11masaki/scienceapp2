@@ -1679,6 +1679,52 @@ def prediction():
                          initial_ai_message=initial_ai_message,
                          conversation_history=conversation_history)
 
+@app.route('/reflection')
+def reflection():
+    class_number = request.args.get('class', session.get('class_number', '1'))
+    class_number = normalize_class_value(class_number) or normalize_class_value(session.get('class_number')) or '1'
+    student_number = request.args.get('number', session.get('student_number', '1'))
+    unit = request.args.get('unit')
+    
+    session['class_number'] = class_number
+    session['student_number'] = student_number
+    session['unit'] = unit
+    session['current_stage'] = 'reflection'
+    
+    task_content = load_task_content(unit)
+    session['task_content'] = task_content
+    
+    # 常に新規開始 - セッションを完全にリセット
+    session['reflection_conversation'] = []
+    session['reflection_summary'] = ''
+    session['reflection_summary_created'] = False
+    session.modified = True
+    
+    print(f"[REFLECTION] 新規開始モード")
+    
+    # 考察段階開始を記録
+    update_student_progress(class_number, student_number, unit)
+    
+    # 単元に応じた最初のAIメッセージを取得
+    initial_ai_message = get_initial_ai_message(unit, stage='reflection')
+    
+    # 初期メッセージを会話履歴に追加
+    conversation_history = session.get('reflection_conversation', [])
+    if not conversation_history:
+        conversation_history = [{'role': 'assistant', 'content': initial_ai_message}]
+        session['reflection_conversation'] = conversation_history
+    
+    # 復帰情報を作成
+    reflection_resumption_info = {
+        'is_resumption': False
+    }
+    
+    return render_template('reflection.html', unit=unit, task_content=task_content,
+                         reflection_summary_created=session.get('reflection_summary_created', False),
+                         initial_ai_message=initial_ai_message,
+                         conversation_history=conversation_history,
+                         reflection_resumption_info=reflection_resumption_info)
+
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
@@ -1780,6 +1826,155 @@ def chat():
         print(f"[ERROR] Chat error: {e}")
         print(f"[ERROR] Traceback:\n{error_trace}")
         return jsonify({'error': f'AI接続エラーが発生しました。しばらく待ってから再度お試しください。'}), 500
+
+@app.route('/reflect_chat', methods=['POST'])
+def reflect_chat():
+    """Reflection conversation endpoint (same as /chat but for reflection stage)"""
+    try:
+        if request.content_type and 'application/json' not in request.content_type:
+            return jsonify({'error': 'Content-Type が application/json である必要があります'}), 400
+        
+        if not request.json:
+            return jsonify({'error': 'リクエストボディが空です'}), 400
+        
+        user_message = request.json.get('message')
+        if not user_message:
+            return jsonify({'error': 'メッセージが指定されていません'}), 400
+        
+        conversation = session.get('reflection_conversation', [])
+        unit = session.get('unit')
+        student_number = session.get('student_number')
+        
+        print(f"[REFLECT_CHAT] message: {user_message[:50]}...")
+        print(f"[REFLECT_CHAT] unit: {unit}, student: {student_number}")
+        print(f"[REFLECT_CHAT] conversation length: {len(conversation)}")
+        
+    except Exception as e:
+        print(f"[ERROR] Reflect chat request parsing error: {e}")
+        return jsonify({'error': f'リクエスト解析エラー: {str(e)}'}), 400
+    
+    # 対話履歴に追加
+    conversation.append({'role': 'user', 'content': user_message})
+    
+    # 反省ステージ用プロンプトを読み込み
+    unit_prompt = load_unit_prompt(unit, stage='reflection')
+    
+    # メッセージフォーマットで構築
+    messages = [
+        {"role": "system", "content": unit_prompt}
+    ]
+    
+    for msg in conversation:
+        messages.append({
+            "role": msg['role'],
+            "content": msg['content']
+        })
+    
+    try:
+        ai_response = call_openai_with_retry(messages, unit=unit, stage='reflection', enable_cache=True)
+        ai_message = extract_message_from_json_response(ai_response)
+        
+        conversation.append({'role': 'assistant', 'content': ai_message})
+        session['reflection_conversation'] = conversation
+        
+        # セッションをDBに保存
+        student_id = f"{session.get('class_number')}_{session.get('student_number')}"
+        save_session_to_db(student_id, unit, 'reflection', conversation)
+        
+        # 学習ログを保存
+        save_learning_log(
+            student_number=session.get('student_number'),
+            unit=unit,
+            log_type='reflection_chat',
+            data={
+                'user_message': user_message,
+                'ai_response': ai_message
+            },
+            class_number=session.get('class_number')
+        )
+        
+        user_messages_count = sum(1 for msg in conversation if msg['role'] == 'user')
+        suggest_summary = user_messages_count >= 2
+        
+        response_data = {
+            'response': ai_message,
+            'suggest_summary': suggest_summary,
+            'should_auto_generate_summary': False
+        }
+        
+        print(f"[REFLECT_CHAT] AI response success, user_messages: {user_messages_count}")
+        return jsonify(response_data)
+        
+    except Exception as e:
+        import traceback
+        print(f"[ERROR] Reflect chat error: {e}")
+        print(traceback.format_exc())
+        return jsonify({'error': f'AI接続エラーが発生しました。しばらく待ってから再度お試しください。'}), 500
+
+@app.route('/final_summary', methods=['POST'])
+def final_summary():
+    """Generate final summary for reflection"""
+    try:
+        conversation = session.get('reflection_conversation', [])
+        unit = session.get('unit')
+        student_number = session.get('student_number')
+        class_number = session.get('class_number')
+        
+        if not conversation or not unit:
+            return jsonify({'error': '会話履歴がありません'}), 400
+        
+        print(f"[FINAL_SUMMARY] Generating for {class_number}_{student_number}, unit: {unit}")
+        
+        # プロンプト読み込み
+        unit_prompt = load_unit_prompt(unit, stage='reflection')
+        
+        messages = [
+            {"role": "system", "content": unit_prompt}
+        ]
+        
+        for msg in conversation:
+            messages.append({
+                "role": msg['role'],
+                "content": msg['content']
+            })
+        
+        # まとめ要求メッセージを追加
+        summary_request = "これまでの対話をもとに、あなたの考察をまとめてください。"
+        messages.append({
+            "role": "user",
+            "content": summary_request
+        })
+        
+        ai_response = call_openai_with_retry(messages, unit=unit, stage='reflection', enable_cache=False)
+        summary_text = extract_message_from_json_response(ai_response)
+        
+        session['reflection_summary'] = summary_text
+        session['reflection_summary_created'] = True
+        session.modified = True
+        
+        # セッション保存
+        student_id = f"{class_number}_{student_number}"
+        save_session_to_db(student_id, unit, 'reflection', conversation)
+        
+        # ログ保存
+        save_learning_log(
+            student_number=student_number,
+            unit=unit,
+            log_type='reflection_summary',
+            data={
+                'reflection_summary': summary_text
+            },
+            class_number=class_number
+        )
+        
+        print(f"[FINAL_SUMMARY] Generated successfully")
+        return jsonify({'summary': summary_text, 'success': True})
+        
+    except Exception as e:
+        import traceback
+        print(f"[ERROR] Final summary error: {e}")
+        print(traceback.format_exc())
+        return jsonify({'error': f'要約生成エラー: {str(e)}'}), 500
 
 @app.route('/report_error', methods=['POST'])
 def report_error():

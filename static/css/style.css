@@ -2906,7 +2906,7 @@ body {
 
 /* 上半分: チャット画面 */
 .chat-section {
-    height: 50vh;  /* 50%に調整 */
+    height: 80vh;  /* 80%に調整 */
     display: flex;
     flex-direction: column;
     padding: 6px;
@@ -2998,7 +2998,7 @@ body {
 
 /* 下半分: 入力補助エリア */
 .input-assist-section {
-    height: 50vh;  /* 50%に調整 */
+    height: 20vh;  /* 20%に調整 */
     display: flex;
     flex-direction: column;
     padding: 4px;  /* パディングを小さく */
