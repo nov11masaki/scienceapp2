@@ -3348,10 +3348,35 @@ def load_student_history(student_id):
 
 
 def _supplement_conversation_from_logs(history, student_id):
-    """学習ログから会話データを取得して、履歴に補完する"""
+    """学習ログから会話データを取得して、履歴に補完する
+    
+    優先順：
+    1. セッションストレージから取得
+    2. 学習ログから取得
+    """
+    try:
+        # セッションストレージから取得
+        sessions = _read_json_file(SESSION_STORAGE_FILE)
+        if sessions:
+            for key, session_data in sessions.items():
+                if key.startswith(student_id + "_"):
+                    parts = key.replace(student_id + "_", "").rsplit("_", 1)
+                    if len(parts) == 2:
+                        unit, stage = parts[0], parts[1]
+                        if unit in history and stage in history[unit]:
+                            if 'conversation' not in history[unit][stage]:
+                                conversation = session_data.get('conversation', [])
+                                if conversation:
+                                    history[unit][stage]['conversation'] = conversation
+                                    print(f"[HISTORY_LOGS] Supplemented {unit} {stage} with {len(conversation)} messages from session storage")
+    except Exception as e:
+        print(f"[HISTORY_LOGS] Error reading session storage: {e}")
+    
+    # セッションストレージでも見つからない場合、学習ログから取得
     try:
         # 学習ログファイルを列挙
         log_files = glob.glob('logs/learning_log_*.json')
+        print(f"[HISTORY_LOGS] Searching logs for student_id: {student_id}, found {len(log_files)} log files")
         
         for log_file in log_files:
             try:
@@ -3360,46 +3385,29 @@ def _supplement_conversation_from_logs(history, student_id):
                 
                 for log in logs:
                     # 学習者IDが一致し、会話ログ（chat）である場合
-                    log_student_id = f"{log.get('class_num', log.get('class_display', ''))}_{log.get('seat_num', log.get('student_number', ''))}"
+                    class_num = log.get('class_num')
+                    seat_num = log.get('seat_num')
+                    student_number = log.get('student_number')
+                    class_display = log.get('class_display', '')
+                    
+                    # class_numとseat_numを優先的に使用
+                    if class_num is not None and seat_num is not None:
+                        log_student_id = f"{class_num}_{seat_num}"
+                    else:
+                        # フォールバック
+                        log_student_id = f"{class_display}_{student_number}" if class_display and student_number else None
+                    
                     if log_student_id == student_id and log.get('log_type') in ['prediction_chat', 'reflection_chat']:
                         unit = log.get('unit')
                         stage = 'prediction' if log.get('log_type') == 'prediction_chat' else 'reflection'
                         
-                        if unit and stage:
-                            if unit not in history:
-                                history[unit] = {}
-                            
-                            # サマリーがない場合、またはサマリーに会話がない場合に学習ログから補完
-                            if stage not in history[unit]:
-                                history[unit][stage] = {
-                                    'summary': '',
-                                    'saved_at': log.get('timestamp', datetime.now().isoformat()),
-                                    'conversation': log.get('data', {}).get('conversation', [])
-                                }
-                            elif 'conversation' not in history[unit][stage]:
+                        if unit and stage and unit in history and stage in history[unit]:
+                            if 'conversation' not in history[unit][stage]:
                                 # サマリーには会話がないので、ログから補完
-                                history[unit][stage]['conversation'] = log.get('data', {}).get('conversation', [])
-                    
-                    # prediction_summary / reflection_summary の場合
-                    elif log_student_id == student_id and log.get('log_type') in ['prediction_summary', 'reflection_summary']:
-                        unit = log.get('unit')
-                        stage = 'prediction' if log.get('log_type') == 'prediction_summary' else 'reflection'
-                        
-                        if unit and stage:
-                            if unit not in history:
-                                history[unit] = {}
-                            
-                            if stage not in history[unit]:
-                                history[unit][stage] = {
-                                    'summary': log.get('data', {}).get('summary', ''),
-                                    'saved_at': log.get('timestamp', datetime.now().isoformat()),
-                                    'conversation': log.get('data', {}).get('conversation', [])
-                                }
-                            elif 'summary' not in history[unit][stage] or not history[unit][stage]['summary']:
-                                # サマリーデータを更新
-                                history[unit][stage]['summary'] = log.get('data', {}).get('summary', '')
-                                if 'conversation' not in history[unit][stage]:
-                                    history[unit][stage]['conversation'] = log.get('data', {}).get('conversation', [])
+                                conversation = log.get('data', {}).get('conversation', [])
+                                if conversation:
+                                    history[unit][stage]['conversation'] = conversation
+                                    print(f"[HISTORY_LOGS] Supplemented {unit} {stage} with {len(conversation)} messages from logs")
             except Exception as e:
                 print(f"[HISTORY_LOGS] Error reading {log_file}: {e}")
     except Exception as e:

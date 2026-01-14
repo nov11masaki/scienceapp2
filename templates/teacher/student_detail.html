@@ -90,7 +90,7 @@
                                 予想対話: {{ unit_data.prediction_chats|length }}回
                             </span>
                             <span class="badge bg-info me-2">
-                                振り返り対話: {{ unit_data.reflection_chats|length }}回
+                                考察対話: {{ unit_data.reflection_chats|length }}回
                             </span>
                             {% if unit_data.prediction_summary %}
                             <span class="badge bg-success me-2">予想まとめ完了</span>
@@ -119,7 +119,7 @@
                     </div>
                     {% endif %}
 
-                    <!-- 最終まとめ -->
+                    <!-- 考察 -->
                     {% if unit_data.final_summary %}
                     <div class="summary-card mb-3">
                         <div class="card">
@@ -164,12 +164,12 @@
                     </div>
                     {% endif %}
 
-                    <!-- 振り返り対話 -->
+                    <!-- 考察対話 -->
                     {% if unit_data.reflection_chats %}
                     <div class="chat-section mb-3">
                         <h6 class="section-title">
                             <i class="fas fa-comments text-info"></i>
-                            振り返り対話履歴（{{ unit_data.reflection_chats|length }}件）
+                            考察対話履歴（{{ unit_data.reflection_chats|length }}件）
                         </h6>
                         <div class="chat-section-content">
                             {% for chat in unit_data.reflection_chats %}
