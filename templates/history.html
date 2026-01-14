@@ -152,6 +152,9 @@ const urlParams = new URLSearchParams(window.location.search);
 const classNumber = urlParams.get('class') || '1';
 const studentNumber = urlParams.get('number') || '1';
 
+// グローバルで履歴データを保持
+let historyData = {};
+
 // クラス番号と出席番号を表示
 document.getElementById('selectedClass').textContent = classNumber;
 document.getElementById('selectedNumber').textContent = studentNumber;
@@ -162,9 +165,9 @@ document.addEventListener('DOMContentLoaded', loadHistory);
 async function loadHistory() {
     try {
         const response = await fetch(`/api/student-history?class=${classNumber}&number=${studentNumber}`);
-        const history = await response.json();
+        historyData = await response.json();
         
-        displayHistory(history);
+        displayHistory(historyData);
     } catch (error) {
         console.error('履歴の読み込みに失敗しました:', error);
         document.getElementById('history-container').innerHTML = `
@@ -202,10 +205,11 @@ function displayHistory(history) {
         if (stages.prediction) {
             const predData = stages.prediction;
             const savedDate = new Date(predData.saved_at).toLocaleString('ja-JP');
+            const dataKey = `${unit}_prediction`;
             
             html += `
                 <div class="stage-badge stage-badge-prediction" 
-                     onclick="showDetail('${unit}', 'prediction', '${JSON.stringify(predData).replace(/'/g, "&apos;")}')">
+                     onclick="showDetail('${dataKey}')">
                     <i class="fas fa-lightbulb"></i>
                     <span>予想</span>
                     <small style="opacity: 0.7;">${savedDate.split(' ')[0]}</small>
@@ -216,10 +220,11 @@ function displayHistory(history) {
         if (stages.reflection) {
             const reflData = stages.reflection;
             const savedDate = new Date(reflData.saved_at).toLocaleString('ja-JP');
+            const dataKey = `${unit}_reflection`;
             
             html += `
                 <div class="stage-badge stage-badge-reflection"
-                     onclick="showDetail('${unit}', 'reflection', '${JSON.stringify(reflData).replace(/'/g, "&apos;")}')">
+                     onclick="showDetail('${dataKey}')">
                     <i class="fas fa-comments"></i>
                     <span>考察</span>
                     <small style="opacity: 0.7;">${savedDate.split(' ')[0]}</small>
@@ -236,36 +241,42 @@ function displayHistory(history) {
     container.innerHTML = html;
 }
 
-function showDetail(unit, stage, dataStr) {
-    try {
-        const data = JSON.parse(dataStr);
-        const title = `${unit} - ${stage === 'prediction' ? '予想' : '考察'}`;
-        const summary = data.summary || '（内容なし）';
-        const savedDate = new Date(data.saved_at).toLocaleString('ja-JP');
-        
-        const stageLabel = stage === 'prediction' ? '予想段階' : '考察段階';
-        
-        let bodyContent = `
-            <div class="mb-3">
-                <h6 class="text-muted">保存日時</h6>
-                <p>${savedDate}</p>
-            </div>
-            <div>
-                <h6 class="text-muted">内容</h6>
-                <div class="summary-text">
-                    ${summary}
-                </div>
-            </div>
-        `;
-        
-        document.getElementById('detailModalTitle').textContent = title;
-        document.getElementById('detailModalBody').innerHTML = bodyContent;
-        
-        new bootstrap.Modal(document.getElementById('detailModal')).show();
-    } catch (error) {
-        console.error('詳細の表示に失敗しました:', error);
-        alert('詳細を表示できません');
+function showDetail(dataKey) {
+    const [unit, stage] = dataKey.split('_');
+    const data = historyData[unit] && historyData[unit][stage];
+    
+    if (!data) {
+        alert('詳細を取得できません');
+        return;
     }
+    
+    const title = `${unit} - ${stage === 'prediction' ? '予想' : '考察'}`;
+    const summary = data.summary || '（内容なし）';
+    const savedDate = new Date(data.saved_at).toLocaleString('ja-JP');
+    
+    let bodyContent = `
+        <div class="mb-3">
+            <h6 class="text-muted">保存日時</h6>
+            <p>${savedDate}</p>
+        </div>
+        <div>
+            <h6 class="text-muted">内容</h6>
+            <div class="summary-text">
+                ${escapeHtml(summary)}
+            </div>
+        </div>
+    `;
+    
+    document.getElementById('detailModalTitle').textContent = title;
+    document.getElementById('detailModalBody').innerHTML = bodyContent;
+    
+    new bootstrap.Modal(document.getElementById('detailModal')).show();
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 function goBack() {
