@@ -1,0 +1,275 @@
+{% extends "base.html" %}
+
+{% block title %}学習履歴{% endblock %}
+
+{% block content %}
+<div class="history-page">
+    <div class="container mt-4">
+        <div class="text-center mb-4">
+            <div class="class-info-banner mb-3">
+                <span class="class-badge">４年<span id="selectedClass"></span>組 <span id="selectedNumber"></span>番</span>
+            </div>
+            <h2 class="mb-3">
+                <i class="fas fa-history text-primary"></i>
+                学習履歴
+            </h2>
+            <p class="text-muted">これまでの予想と考察を確認できます</p>
+        </div>
+
+        <div class="row justify-content-center">
+            <div class="col-lg-10">
+                <div id="history-container">
+                    <div class="alert alert-info">
+                        <i class="fas fa-spinner fa-spin"></i> 読み込み中...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="text-center mt-5">
+            <a href="#" onclick="goBack()" class="btn btn-outline-secondary me-3">
+                <i class="fas fa-arrow-left me-2"></i>単元選択に戻る
+            </a>
+            <a href="/" class="btn btn-outline-secondary">
+                <i class="fas fa-home me-2"></i>最初に戻る
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- 詳細モーダル -->
+<div class="modal fade" id="detailModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="detailModalTitle"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="detailModalBody">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .history-page {
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        min-height: 100vh;
+        padding: 20px 0;
+    }
+
+    .unit-history-card {
+        background: white;
+        border-radius: 10px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .unit-history-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+    }
+
+    .unit-title {
+        color: #333;
+        font-weight: bold;
+        margin-bottom: 15px;
+        font-size: 1.2rem;
+    }
+
+    .stage-container {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+
+    .stage-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 15px;
+        border-radius: 5px;
+        font-size: 0.95rem;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .stage-badge-prediction {
+        background-color: #e3f2fd;
+        border-left: 4px solid #2196f3;
+        color: #1976d2;
+    }
+
+    .stage-badge-prediction:hover {
+        background-color: #bbdefb;
+        transform: translateY(-2px);
+    }
+
+    .stage-badge-reflection {
+        background-color: #f3e5f5;
+        border-left: 4px solid #9c27b0;
+        color: #7b1fa2;
+    }
+
+    .stage-badge-reflection:hover {
+        background-color: #e1bee7;
+        transform: translateY(-2px);
+    }
+
+    .no-data {
+        padding: 30px;
+        text-align: center;
+        color: #999;
+    }
+
+    .summary-text {
+        background: #f9f9f9;
+        padding: 15px;
+        border-left: 4px solid #2196f3;
+        border-radius: 4px;
+        margin: 10px 0;
+        line-height: 1.6;
+    }
+
+    .summary-meta {
+        font-size: 0.85rem;
+        color: #666;
+        margin-top: 10px;
+    }
+</style>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// URLからクラス番号と出席番号を取得
+const urlParams = new URLSearchParams(window.location.search);
+const classNumber = urlParams.get('class') || '1';
+const studentNumber = urlParams.get('number') || '1';
+
+// クラス番号と出席番号を表示
+document.getElementById('selectedClass').textContent = classNumber;
+document.getElementById('selectedNumber').textContent = studentNumber;
+
+// ページ読み込み時に履歴を取得
+document.addEventListener('DOMContentLoaded', loadHistory);
+
+async function loadHistory() {
+    try {
+        const response = await fetch(`/api/student-history?class=${classNumber}&number=${studentNumber}`);
+        const history = await response.json();
+        
+        displayHistory(history);
+    } catch (error) {
+        console.error('履歴の読み込みに失敗しました:', error);
+        document.getElementById('history-container').innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-circle"></i> 履歴の読み込みに失敗しました
+            </div>
+        `;
+    }
+}
+
+function displayHistory(history) {
+    const container = document.getElementById('history-container');
+    
+    if (!history || Object.keys(history).length === 0) {
+        container.innerHTML = `
+            <div class="no-data">
+                <i class="fas fa-inbox" style="font-size: 2rem; color: #ddd; margin-bottom: 10px;"></i>
+                <p>まだ学習履歴がありません</p>
+            </div>
+        `;
+        return;
+    }
+
+    let html = '';
+
+    for (const [unit, stages] of Object.entries(history)) {
+        html += `
+            <div class="unit-history-card">
+                <div class="unit-title">
+                    <i class="fas fa-book"></i> ${unit}
+                </div>
+                <div class="stage-container">
+        `;
+
+        if (stages.prediction) {
+            const predData = stages.prediction;
+            const savedDate = new Date(predData.saved_at).toLocaleString('ja-JP');
+            
+            html += `
+                <div class="stage-badge stage-badge-prediction" 
+                     onclick="showDetail('${unit}', 'prediction', '${JSON.stringify(predData).replace(/'/g, "&apos;")}')">
+                    <i class="fas fa-lightbulb"></i>
+                    <span>予想</span>
+                    <small style="opacity: 0.7;">${savedDate.split(' ')[0]}</small>
+                </div>
+            `;
+        }
+
+        if (stages.reflection) {
+            const reflData = stages.reflection;
+            const savedDate = new Date(reflData.saved_at).toLocaleString('ja-JP');
+            
+            html += `
+                <div class="stage-badge stage-badge-reflection"
+                     onclick="showDetail('${unit}', 'reflection', '${JSON.stringify(reflData).replace(/'/g, "&apos;")}')">
+                    <i class="fas fa-comments"></i>
+                    <span>考察</span>
+                    <small style="opacity: 0.7;">${savedDate.split(' ')[0]}</small>
+                </div>
+            `;
+        }
+
+        html += `
+                </div>
+            </div>
+        `;
+    }
+
+    container.innerHTML = html;
+}
+
+function showDetail(unit, stage, dataStr) {
+    try {
+        const data = JSON.parse(dataStr);
+        const title = `${unit} - ${stage === 'prediction' ? '予想' : '考察'}`;
+        const summary = data.summary || '（内容なし）';
+        const savedDate = new Date(data.saved_at).toLocaleString('ja-JP');
+        
+        const stageLabel = stage === 'prediction' ? '予想段階' : '考察段階';
+        
+        let bodyContent = `
+            <div class="mb-3">
+                <h6 class="text-muted">保存日時</h6>
+                <p>${savedDate}</p>
+            </div>
+            <div>
+                <h6 class="text-muted">内容</h6>
+                <div class="summary-text">
+                    ${summary}
+                </div>
+            </div>
+        `;
+        
+        document.getElementById('detailModalTitle').textContent = title;
+        document.getElementById('detailModalBody').innerHTML = bodyContent;
+        
+        new bootstrap.Modal(document.getElementById('detailModal')).show();
+    } catch (error) {
+        console.error('詳細の表示に失敗しました:', error);
+        alert('詳細を表示できません');
+    }
+}
+
+function goBack() {
+    window.location.href = `/select_unit?class=${classNumber}&number=${studentNumber}`;
+}
+</script>
+{% endblock %}

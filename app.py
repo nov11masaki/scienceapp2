@@ -3219,6 +3219,96 @@ def detect_patterns(messages):
         return {}
 
 
+# 学習履歴ページ（学習者が自分の過去の予想・考察を確認）
+@app.route('/history')
+def history():
+    """学習履歴ページ：学習者が自分の過去の学習を確認できるページ"""
+    class_number = request.args.get('class', '1')
+    student_number = request.args.get('number', '1')
+    
+    # student_idを構築
+    student_id = f"{class_number}_{student_number}"
+    
+    # この学習者の履歴を取得
+    history_data = load_student_history(student_id)
+    
+    return render_template(
+        'history.html',
+        class_number=class_number,
+        student_number=student_number,
+        history=history_data,
+        units=UNITS
+    )
+
+@app.route('/api/student-history')
+def api_student_history():
+    """学習者の履歴一覧をJSON形式で返すAPI"""
+    class_number = request.args.get('class', '1')
+    student_number = request.args.get('number', '1')
+    
+    student_id = f"{class_number}_{student_number}"
+    history_data = load_student_history(student_id)
+    
+    return jsonify(history_data)
+
+def load_student_history(student_id):
+    """学習者の履歴を読み込む（GCS/Firestore優先、ローカルはフォールバック）"""
+    history = {}
+    
+    # GCSから読み込み
+    if USE_GCS and bucket:
+        try:
+            # summariesディレクトリ内の該当学習者のファイルを列挙
+            blobs = bucket.list_blobs(prefix=f"summaries/{student_id}_")
+            
+            for blob in blobs:
+                # ファイル名から単元とステージを抽出
+                # 形式: summaries/{student_id}_{unit}_{stage}
+                filename = blob.name.replace(f"summaries/{student_id}_", "")
+                parts = filename.rsplit("_", 1)
+                
+                if len(parts) == 2:
+                    unit, stage = parts[0], parts[1]
+                    
+                    try:
+                        data = json.loads(blob.download_as_string().decode('utf-8'))
+                        
+                        if unit not in history:
+                            history[unit] = {}
+                        
+                        history[unit][stage] = data
+                    except Exception as e:
+                        print(f"[HISTORY] Error reading blob {blob.name}: {e}")
+            
+            return history
+        except Exception as e:
+            print(f"[HISTORY] GCS read failed: {e}, falling back to local")
+    
+    # ローカルJSONから読み込み
+    try:
+        summary_file = 'summary_storage.json'
+        
+        if os.path.exists(summary_file):
+            with open(summary_file, 'r', encoding='utf-8') as f:
+                all_summaries = json.load(f)
+            
+            # 該当学習者のみ抽出
+            for key, data in all_summaries.items():
+                if key.startswith(student_id + "_"):
+                    parts = key.replace(student_id + "_", "").rsplit("_", 1)
+                    
+                    if len(parts) == 2:
+                        unit, stage = parts[0], parts[1]
+                        
+                        if unit not in history:
+                            history[unit] = {}
+                        
+                        history[unit][stage] = data
+    except Exception as e:
+        print(f"[HISTORY] Local read failed: {e}")
+    
+    return history
+
 if __name__ == '__main__':
     # 環境変数からポート番号を取得（CloudRun用）
     port = int(os.environ.get('PORT', 5014))
