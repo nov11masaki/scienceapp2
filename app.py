@@ -490,7 +490,7 @@ def perform_summary_job(conversation, unit, student_id, class_number, student_nu
         summary_text = extract_message_from_json_response(summary_response)
 
         # Persist summary
-        _save_summary_to_db(student_id, unit, stage, summary_text)
+        _save_summary_to_db(student_id, unit, stage, summary_text, conversation)
 
         # Update progress and logs
         try:
@@ -2094,7 +2094,7 @@ def summary():
                 session['prediction_summary'] = summary_text
                 session['prediction_summary_created'] = True
                 session.modified = True
-                _save_summary_to_db(student_id, unit, 'prediction', summary_text)
+                _save_summary_to_db(student_id, unit, 'prediction', summary_text, conversation)
                 update_student_progress(class_number=class_number, student_number=student_number, unit=unit, prediction_summary_created=True)
                 save_learning_log(student_number=student_number, unit=unit, log_type='prediction_summary', data={'summary': summary_text, 'conversation': conversation}, class_number=class_number)
                 print(f"[SUMMARY] Synchronous summary generated for {student_id}_{unit}")
@@ -2118,7 +2118,7 @@ def summary():
                 session['prediction_summary_created'] = True
                 session.modified = True
                 print(f"[SUMMARY] Step 4: Saving to database...")
-                _save_summary_to_db(student_id, unit, 'prediction', summary_text)
+                _save_summary_to_db(student_id, unit, 'prediction', summary_text, conversation)
                 print(f"[SUMMARY] Step 5: Updating progress...")
                 update_student_progress(class_number=class_number, student_number=student_number, unit=unit, prediction_summary_created=True)
                 print(f"[SUMMARY] Step 6: Saving learning log...")
@@ -2210,7 +2210,7 @@ def sync_session():
         # サマリーも保存したい場合は別途保存
         if summary_content:
             # Save the summary using the standard helper (student_id, unit, stage, summary_text)
-            _save_summary_to_db(student_id, unit, stage, summary_content)
+            _save_summary_to_db(student_id, unit, stage, summary_content, chat_messages)
         
         print(f"[SYNC] Session synced - {student_id}_{unit}_{stage}")
         return jsonify({
@@ -2225,19 +2225,31 @@ def sync_session():
             'details': str(e)
         }), 500
 
-def _save_summary_to_db(student_id, unit, stage, summary_text):
-    """サマリーを永続ストレージに保存（GCS優先、ローカルはフォールバック）"""
+def _save_summary_to_db(student_id, unit, stage, summary_text, conversation=None):
+    """サマリーを永続ストレージに保存（GCS優先、ローカルはフォールバック）
+    
+    Args:
+        student_id: 学習者ID
+        unit: 単元
+        stage: ステージ（'prediction' or 'reflection'）
+        summary_text: サマリーテキスト
+        conversation: 会話データ（オプション）
+    """
     # Firestore 優先
     if USE_FIRESTORE and firestore_client:
         try:
             key = f"{student_id}_{unit}_{stage}"
-            firestore_client.collection('sb_summary_storage').document(key).set({
+            data = {
                 'summary': summary_text,
                 'saved_at': datetime.now().isoformat(),
                 'student_id': student_id,
                 'unit': unit,
                 'stage': stage
-            })
+            }
+            if conversation:
+                data['conversation'] = conversation
+            
+            firestore_client.collection('sb_summary_storage').document(key).set(data)
             print(f"[SUMMARY_SAVE] Firestore - {key}")
             return
         except Exception as e:
@@ -2246,7 +2258,7 @@ def _save_summary_to_db(student_id, unit, stage, summary_text):
     # 本番環境: GCS優先
     if USE_GCS and bucket:
         try:
-            _save_summary_gcs(student_id, unit, stage, summary_text)
+            _save_summary_gcs(student_id, unit, stage, summary_text, conversation)
             print(f"[SUMMARY_SAVE] GCS - {student_id}_{unit}_{stage}")
             return  # GCS保存成功したらローカル保存は不要
         except Exception as e:
@@ -2254,12 +2266,12 @@ def _save_summary_to_db(student_id, unit, stage, summary_text):
     
     # 開発環境またはGCS失敗時: ローカル保存
     try:
-        _save_summary_local(student_id, unit, stage, summary_text)
+        _save_summary_local(student_id, unit, stage, summary_text, conversation)
         print(f"[SUMMARY_SAVE] Local - {student_id}_{unit}_{stage}")
     except Exception as e:
         print(f"[SUMMARY_SAVE] Local failed: {e}")
 
-def _save_summary_gcs(student_id, unit, stage, summary_text):
+def _save_summary_gcs(student_id, unit, stage, summary_text, conversation=None):
     """サマリーをGCSに保存"""
     try:
         if not bucket:
@@ -2273,6 +2285,8 @@ def _save_summary_gcs(student_id, unit, stage, summary_text):
             'unit': unit,
             'stage': stage
         }
+        if conversation:
+            summary_data['conversation'] = conversation
         
         blob = bucket.blob(key)
         blob.upload_from_string(json.dumps(summary_data, ensure_ascii=False), content_type='application/json')
@@ -2282,7 +2296,7 @@ def _save_summary_gcs(student_id, unit, stage, summary_text):
         raise
 
 
-def _save_summary_local(student_id, unit, stage, summary_text):
+def _save_summary_local(student_id, unit, stage, summary_text, conversation=None):
     """サマリーをローカルファイルに保存"""
     try:
         summary_file = 'summary_storage.json'
@@ -2305,6 +2319,8 @@ def _save_summary_local(student_id, unit, stage, summary_text):
             'unit': unit,
             'stage': stage
         }
+        if conversation:
+            summaries[key]['conversation'] = conversation
         
         # ファイルに保存
         with open(summary_file, 'w', encoding='utf-8') as f:

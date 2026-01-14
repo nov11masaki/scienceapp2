@@ -253,19 +253,49 @@ function showDetail(dataKey) {
     const title = `${unit} - ${stage === 'prediction' ? '予想' : '考察'}`;
     const summary = data.summary || '（内容なし）';
     const savedDate = new Date(data.saved_at).toLocaleString('ja-JP');
+    const conversation = data.conversation || [];
     
     let bodyContent = `
         <div class="mb-3">
             <h6 class="text-muted">保存日時</h6>
             <p>${savedDate}</p>
         </div>
-        <div>
+        <div class="mb-3">
             <h6 class="text-muted">内容</h6>
             <div class="summary-text">
                 ${escapeHtml(summary)}
             </div>
         </div>
     `;
+    
+    // 会話がある場合は表示
+    if (conversation.length > 0) {
+        bodyContent += `
+            <div class="mt-4">
+                <h6 class="text-muted">その時の会話</h6>
+                <div class="conversation-history" style="max-height: 300px; overflow-y: auto; background-color: #f8f9fa; padding: 12px; border-radius: 4px;">
+        `;
+        
+        conversation.forEach((msg, index) => {
+            const isAssistant = msg.role === 'assistant';
+            const messageClass = isAssistant ? 'assistant-message' : 'user-message';
+            const icon = isAssistant ? '🤖' : '👧';
+            
+            bodyContent += `
+                <div style="margin-bottom: 10px;">
+                    <strong style="color: ${isAssistant ? '#0066cc' : '#666666'};">${icon} ${isAssistant ? '先生' : '自分'}</strong>
+                    <div style="background-color: ${isAssistant ? '#e8f4f8' : '#fff9e6'}; padding: 8px 12px; border-radius: 4px; margin-top: 4px; word-break: break-word;">
+                        ${escapeHtml(msg.content)}
+                    </div>
+                </div>
+            `;
+        });
+        
+        bodyContent += `
+                </div>
+            </div>
+        `;
+    }
     
     document.getElementById('detailModalTitle').textContent = title;
     document.getElementById('detailModalBody').innerHTML = bodyContent;
