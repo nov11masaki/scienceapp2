@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import csv
 import time
 import hashlib
@@ -134,6 +134,17 @@ ssl_context = ssl.create_default_context(cafile=certifi.where())
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'  # 本番環境では安全なキーに変更
+
+# 日本時間（JST）を取得するヘルパー関数
+JST = timezone(timedelta(hours=9))
+
+def now_jst():
+    """日本時間の現在時刻を返す"""
+    return datetime.now(JST)
+
+def now_jst_isoformat():
+    """日本時間の現在時刻を ISO フォーマットで返す"""
+    return now_jst().isoformat()
 
 # File lock and atomic write utilities to avoid concurrent write corruption.
 # Uses fcntl.flock on Unix-like systems. Also provides an in-process
@@ -353,7 +364,7 @@ SESSION_STORAGE_FILE = os.environ.get('SESSION_STORAGE_FILE', 'session_storage.j
 def save_session_to_db(student_id, unit, stage, conversation_data):
     """セッションデータをデータベースに保存（GCS優先、ローカルはフォールバック）"""
     session_entry = {
-        'timestamp': datetime.now().isoformat(),
+        'timestamp': now_jst_isoformat(),
         'student_id': student_id,
         'unit': unit,
         'stage': stage,  # 'prediction' or 'reflection'
@@ -634,7 +645,7 @@ def get_student_progress(class_number, student_number, unit):
     if unit not in progress_data[student_id]:
         progress_data[student_id][unit] = {
             "current_stage": "prediction",
-            "last_access": datetime.now().isoformat(),
+            "last_access": now_jst_isoformat(),
             "stage_progress": {
                 "prediction": {
                     "started": False,
@@ -1062,7 +1073,7 @@ def save_learning_log(student_number, unit, log_type, data, class_number=None):
             class_display = str(student_number)
     
     log_entry = {
-        'timestamp': datetime.now().isoformat(),
+        'timestamp': now_jst_isoformat(),
         'student_number': student_number,
         'class_num': class_num,
         'seat_num': seat_num,
@@ -1243,7 +1254,7 @@ def save_error_log(student_number, class_number, error_message, error_type, stag
         class_display = str(student_number)
     
     error_entry = {
-        'timestamp': datetime.now().isoformat(),
+        'timestamp': now_jst_isoformat(),
         'student_number': student_number,
         'class_number': class_number,
         'class_display': class_display,
@@ -2241,7 +2252,7 @@ def _save_summary_to_db(student_id, unit, stage, summary_text, conversation=None
             key = f"{student_id}_{unit}_{stage}"
             data = {
                 'summary': summary_text,
-                'saved_at': datetime.now().isoformat(),
+                'saved_at': now_jst_isoformat(),
                 'student_id': student_id,
                 'unit': unit,
                 'stage': stage
@@ -2280,7 +2291,7 @@ def _save_summary_gcs(student_id, unit, stage, summary_text, conversation=None):
         key = f"summaries/{student_id}_{unit}_{stage}"
         summary_data = {
             'summary': summary_text,
-            'saved_at': datetime.now().isoformat(),
+            'saved_at': now_jst_isoformat(),
             'student_id': student_id,
             'unit': unit,
             'stage': stage
@@ -2314,7 +2325,7 @@ def _save_summary_local(student_id, unit, stage, summary_text, conversation=None
         # 新しいサマリーを追加
         summaries[key] = {
             'summary': summary_text,
-            'saved_at': datetime.now().isoformat(),
+            'saved_at': now_jst_isoformat(),
             'student_id': student_id,
             'unit': unit,
             'stage': stage
@@ -2708,7 +2719,7 @@ def teacher_export_json():
                     'unit': unit,
                     'student_id': student_id,
                     'class_display': logs_for_student[0].get('class_display', '') if logs_for_student else '',
-                    'export_date': datetime.now().isoformat(),
+                    'export_date': now_jst_isoformat(),
                     'logs': logs_for_student
                 }
                 
