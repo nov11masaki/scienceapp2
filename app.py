@@ -3279,7 +3279,12 @@ def api_student_history():
     return jsonify(history_data)
 
 def load_student_history(student_id):
-    """学習者の履歴を読み込む（GCS/Firestore優先、ローカルはフォールバック）"""
+    """学習者の履歴を読み込む（GCS/Firestore優先、ローカルはフォールバック）
+    
+    会話データは以下の優先順で取得：
+    1. サマリーストレージ（最近のデータ）
+    2. 学習ログ（既存のデータの補完）
+    """
     history = {}
     
     # GCSから読み込み
@@ -3307,6 +3312,8 @@ def load_student_history(student_id):
                     except Exception as e:
                         print(f"[HISTORY] Error reading blob {blob.name}: {e}")
             
+            # 会話データがない場合、学習ログから取得
+            _supplement_conversation_from_logs(history, student_id)
             return history
         except Exception as e:
             print(f"[HISTORY] GCS read failed: {e}, falling back to local")
@@ -3334,7 +3341,69 @@ def load_student_history(student_id):
     except Exception as e:
         print(f"[HISTORY] Local read failed: {e}")
     
+    # 会話データがない場合、学習ログから取得
+    _supplement_conversation_from_logs(history, student_id)
+    
     return history
+
+
+def _supplement_conversation_from_logs(history, student_id):
+    """学習ログから会話データを取得して、履歴に補完する"""
+    try:
+        # 学習ログファイルを列挙
+        log_files = glob.glob('logs/learning_log_*.json')
+        
+        for log_file in log_files:
+            try:
+                with open(log_file, 'r', encoding='utf-8') as f:
+                    logs = json.load(f)
+                
+                for log in logs:
+                    # 学習者IDが一致し、会話ログ（chat）である場合
+                    log_student_id = f"{log.get('class_num', log.get('class_display', ''))}_{log.get('seat_num', log.get('student_number', ''))}"
+                    if log_student_id == student_id and log.get('log_type') in ['prediction_chat', 'reflection_chat']:
+                        unit = log.get('unit')
+                        stage = 'prediction' if log.get('log_type') == 'prediction_chat' else 'reflection'
+                        
+                        if unit and stage:
+                            if unit not in history:
+                                history[unit] = {}
+                            
+                            # サマリーがない場合、またはサマリーに会話がない場合に学習ログから補完
+                            if stage not in history[unit]:
+                                history[unit][stage] = {
+                                    'summary': '',
+                                    'saved_at': log.get('timestamp', datetime.now().isoformat()),
+                                    'conversation': log.get('data', {}).get('conversation', [])
+                                }
+                            elif 'conversation' not in history[unit][stage]:
+                                # サマリーには会話がないので、ログから補完
+                                history[unit][stage]['conversation'] = log.get('data', {}).get('conversation', [])
+                    
+                    # prediction_summary / reflection_summary の場合
+                    elif log_student_id == student_id and log.get('log_type') in ['prediction_summary', 'reflection_summary']:
+                        unit = log.get('unit')
+                        stage = 'prediction' if log.get('log_type') == 'prediction_summary' else 'reflection'
+                        
+                        if unit and stage:
+                            if unit not in history:
+                                history[unit] = {}
+                            
+                            if stage not in history[unit]:
+                                history[unit][stage] = {
+                                    'summary': log.get('data', {}).get('summary', ''),
+                                    'saved_at': log.get('timestamp', datetime.now().isoformat()),
+                                    'conversation': log.get('data', {}).get('conversation', [])
+                                }
+                            elif 'summary' not in history[unit][stage] or not history[unit][stage]['summary']:
+                                # サマリーデータを更新
+                                history[unit][stage]['summary'] = log.get('data', {}).get('summary', '')
+                                if 'conversation' not in history[unit][stage]:
+                                    history[unit][stage]['conversation'] = log.get('data', {}).get('conversation', [])
+            except Exception as e:
+                print(f"[HISTORY_LOGS] Error reading {log_file}: {e}")
+    except Exception as e:
+        print(f"[HISTORY_LOGS] Error supplementing from logs: {e}")
 
 if __name__ == '__main__':
     # 環境変数からポート番号を取得（CloudRun用）

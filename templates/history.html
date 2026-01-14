@@ -167,6 +167,8 @@ async function loadHistory() {
         const response = await fetch(`/api/student-history?class=${classNumber}&number=${studentNumber}`);
         historyData = await response.json();
         
+        console.log('履歴データ:', historyData);
+        
         displayHistory(historyData);
     } catch (error) {
         console.error('履歴の読み込みに失敗しました:', error);
@@ -245,6 +247,10 @@ function showDetail(dataKey) {
     const [unit, stage] = dataKey.split('_');
     const data = historyData[unit] && historyData[unit][stage];
     
+    console.log('データキー:', dataKey);
+    console.log('該当データ:', data);
+    console.log('会話データ:', data ? data.conversation : 'なし');
+    
     if (!data) {
         alert('詳細を取得できません');
         return;
@@ -254,6 +260,8 @@ function showDetail(dataKey) {
     const summary = data.summary || '（内容なし）';
     const savedDate = new Date(data.saved_at).toLocaleString('ja-JP');
     const conversation = data.conversation || [];
+    
+    console.log('会話の件数:', conversation.length);
     
     let bodyContent = `
         <div class="mb-3">
