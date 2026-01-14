@@ -3283,7 +3283,7 @@ def load_student_history(student_id):
     
     会話データは以下の優先順で取得：
     1. サマリーストレージ（最近のデータ）
-    2. 学習ログ（既存のデータの補完）
+    2. 学習ログから直接抽出（既存のデータの補完）
     """
     history = {}
     
@@ -3291,7 +3291,8 @@ def load_student_history(student_id):
     if USE_GCS and bucket:
         try:
             # summariesディレクトリ内の該当学習者のファイルを列挙
-            blobs = bucket.list_blobs(prefix=f"summaries/{student_id}_")
+            blobs = list(bucket.list_blobs(prefix=f"summaries/{student_id}_"))
+            print(f"[HISTORY] GCS: found {len(blobs)} summary blobs for {student_id}")
             
             for blob in blobs:
                 # ファイル名から単元とステージを抽出
@@ -3309,12 +3310,17 @@ def load_student_history(student_id):
                             history[unit] = {}
                         
                         history[unit][stage] = data
+                        print(f"[HISTORY] GCS loaded {unit}/{stage}")
                     except Exception as e:
                         print(f"[HISTORY] Error reading blob {blob.name}: {e}")
             
-            # 会話データがない場合、学習ログから取得
-            _supplement_conversation_from_logs(history, student_id)
-            return history
+            # GCS からサマリーが見つかった場合、会話を補完して返す
+            if history:
+                print(f"[HISTORY] GCS: supplementing conversations")
+                _supplement_conversation_from_logs(history, student_id)
+                return history
+            else:
+                print(f"[HISTORY] GCS: no summaries found, falling back to local")
         except Exception as e:
             print(f"[HISTORY] GCS read failed: {e}, falling back to local")
     
@@ -3338,10 +3344,11 @@ def load_student_history(student_id):
                             history[unit] = {}
                         
                         history[unit][stage] = data
+                        print(f"[HISTORY] Local loaded {unit}/{stage}")
     except Exception as e:
         print(f"[HISTORY] Local read failed: {e}")
     
-    # 会話データがない場合、学習ログから取得
+    # 会話データを補完（学習ログまたはセッションストレージから）
     _supplement_conversation_from_logs(history, student_id)
     
     return history
@@ -3352,7 +3359,7 @@ def _supplement_conversation_from_logs(history, student_id):
     
     優先順：
     1. セッションストレージから取得
-    2. 学習ログから取得
+    2. 学習ログから直接抽出（GCS または ローカル）
     """
     try:
         # セッションストレージから取得
@@ -3368,50 +3375,102 @@ def _supplement_conversation_from_logs(history, student_id):
                                 conversation = session_data.get('conversation', [])
                                 if conversation:
                                     history[unit][stage]['conversation'] = conversation
-                                    print(f"[HISTORY_LOGS] Supplemented {unit} {stage} with {len(conversation)} messages from session storage")
+                                    print(f"[HISTORY] Supplemented {unit}/{stage} with {len(conversation)} messages from session")
     except Exception as e:
-        print(f"[HISTORY_LOGS] Error reading session storage: {e}")
+        print(f"[HISTORY] Error reading session storage: {e}")
     
-    # セッションストレージでも見つからない場合、学習ログから取得
+    # セッションストレージでも見つからない場合、学習ログから抽出
+    # GCS から学習ログを読み込み
+    if USE_GCS and bucket:
+        try:
+            # 学習ログファイルを列挙
+            blobs = list(bucket.list_blobs(prefix="logs/learning_log_"))
+            print(f"[HISTORY] GCS: found {len(blobs)} log files")
+            
+            for blob in blobs:
+                try:
+                    content = blob.download_as_string()
+                    logs = json.loads(content.decode('utf-8'))
+                    
+                    _extract_conversations_from_logs(logs, student_id, history)
+                except Exception as e:
+                    print(f"[HISTORY] Error reading GCS log {blob.name}: {e}")
+            
+            # 会話が補完されたら終了
+            if _has_conversations(history):
+                return
+        except Exception as e:
+            print(f"[HISTORY] GCS log read failed: {e}, falling back to local")
+    
+    # ローカル学習ログから抽出
     try:
-        # 学習ログファイルを列挙
         log_files = glob.glob('logs/learning_log_*.json')
-        print(f"[HISTORY_LOGS] Searching logs for student_id: {student_id}, found {len(log_files)} log files")
+        print(f"[HISTORY] Local: found {len(log_files)} log files")
         
         for log_file in log_files:
             try:
                 with open(log_file, 'r', encoding='utf-8') as f:
                     logs = json.load(f)
                 
-                for log in logs:
-                    # 学習者IDが一致し、会話ログ（chat）である場合
-                    class_num = log.get('class_num')
-                    seat_num = log.get('seat_num')
-                    student_number = log.get('student_number')
-                    class_display = log.get('class_display', '')
-                    
-                    # class_numとseat_numを優先的に使用
-                    if class_num is not None and seat_num is not None:
-                        log_student_id = f"{class_num}_{seat_num}"
-                    else:
-                        # フォールバック
-                        log_student_id = f"{class_display}_{student_number}" if class_display and student_number else None
-                    
-                    if log_student_id == student_id and log.get('log_type') in ['prediction_chat', 'reflection_chat']:
-                        unit = log.get('unit')
-                        stage = 'prediction' if log.get('log_type') == 'prediction_chat' else 'reflection'
-                        
-                        if unit and stage and unit in history and stage in history[unit]:
-                            if 'conversation' not in history[unit][stage]:
-                                # サマリーには会話がないので、ログから補完
-                                conversation = log.get('data', {}).get('conversation', [])
-                                if conversation:
-                                    history[unit][stage]['conversation'] = conversation
-                                    print(f"[HISTORY_LOGS] Supplemented {unit} {stage} with {len(conversation)} messages from logs")
+                _extract_conversations_from_logs(logs, student_id, history)
             except Exception as e:
-                print(f"[HISTORY_LOGS] Error reading {log_file}: {e}")
+                print(f"[HISTORY] Error reading local log {log_file}: {e}")
     except Exception as e:
-        print(f"[HISTORY_LOGS] Error supplementing from logs: {e}")
+        print(f"[HISTORY] Local log read failed: {e}")
+
+
+def _extract_conversations_from_logs(logs, student_id, history):
+    """学習ログから会話を抽出して history に補完"""
+    for log in logs:
+        # 学習者IDを判定
+        class_num = log.get('class_num')
+        seat_num = log.get('seat_num')
+        student_number = log.get('student_number')
+        class_display = log.get('class_display', '')
+        
+        # class_numとseat_numを優先的に使用
+        if class_num is not None and seat_num is not None:
+            log_student_id = f"{class_num}_{seat_num}"
+        else:
+            # フォールバック
+            log_student_id = f"{class_display}_{student_number}" if class_display and student_number else None
+        
+        if log_student_id != student_id:
+            continue
+        
+        unit = log.get('unit')
+        log_type = log.get('log_type')
+        
+        # 会話ログから抽出
+        if log_type in ['prediction_chat', 'reflection_chat']:
+            stage = 'prediction' if log_type == 'prediction_chat' else 'reflection'
+            
+            if unit and stage and unit in history and stage in history[unit]:
+                if 'conversation' not in history[unit][stage]:
+                    conversation = log.get('data', {}).get('conversation', [])
+                    if conversation:
+                        history[unit][stage]['conversation'] = conversation
+                        print(f"[HISTORY] Extracted {len(conversation)} messages for {unit}/{stage} from logs")
+        
+        # サマリーログから抽出（会話がない場合）
+        elif log_type in ['prediction_summary', 'reflection_summary']:
+            stage = 'prediction' if log_type == 'prediction_summary' else 'reflection'
+            
+            if unit and stage and unit in history and stage in history[unit]:
+                if 'conversation' not in history[unit][stage]:
+                    conversation = log.get('data', {}).get('conversation', [])
+                    if conversation:
+                        history[unit][stage]['conversation'] = conversation
+                        print(f"[HISTORY] Extracted {len(conversation)} messages for {unit}/{stage} from summary log")
+
+
+def _has_conversations(history):
+    """履歴内に会話データがあるかチェック"""
+    for unit in history.values():
+        for stage in unit.values():
+            if 'conversation' in stage and stage['conversation']:
+                return True
+    return False
 
 if __name__ == '__main__':
     # 環境変数からポート番号を取得（CloudRun用）
