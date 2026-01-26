@@ -13,10 +13,21 @@ ScienceBuddy は、小学校理科の学習過程において、子ども達が*
 - 🔍 **実験段階（教員主導）**: 児童が実際に実験を実施して「何が変わったか」を観察
 - 💭 **考察段階（AI対話）**: 実際の変化と予想を比較しながら、新しい理解を形成 → AIが考察をまとめる
 - 📋 **記録**: 全ての対話と学習過程をJSON形式でログに記録
+- 📊 **学習分析**: 教員用ダッシュボードで児童の予想・考察の傾向を可視化
 
-### 主な改善点（2025年12月〜1月版）
+### 主な改善点（2025年12月〜2026年1月版）
 
-#### 🔥 最新アップデート（2026/01/14）
+#### 🔥 最新アップデート（2026/01/26）
+- **理科用語含有率分析** - 児童の言語使用の変化を定量的に分析
+  - 予想段階と考察段階での理科用語の使用率を比較
+  - 生活語彙から科学的用語への変容を追跡
+  - 単元別の理科用語辞書による精密な分析
+- **教員ダッシュボードの強化** - 分析機能の統合
+  - 個別児童の詳細分析ページ
+  - クラス全体の語彙獲得傾向の可視化
+  - AIによる指導インサイトの提案
+
+#### ✅ 学習履歴ページ（2026/01/14）
 - **学習履歴ページの追加** - 生徒が過去の予想・考察を時系列で確認可能
   - 会話データの自動保存と表示
   - 学習ログからの会話データ補完機能
@@ -118,21 +129,27 @@ ScienceBuddy は、小学校理科の学習過程において、子ども達が*
   - Chrome、Edge、Safari対応
 
 ### 👩‍🏫 教員用機能
-- **認証システム** - 教員専用ログイン
+- **認証システム** - 教員専用ログイン（クラス別権限管理）
 - **学習ログ確認** - 学生の対話プロセス詳細表示
 - **学習進捗管理** - 学生ごとの学習状況把握
-<!-- ノート写真機能は削除済み -->
+- **分析ダッシュボード** - 児童の予想・考察の傾向を可視化
+  - **理科用語含有率分析** - テキスト中の理科用語の割合を計算
+  - **語彙獲得率追跡** - 生活語彙から科学的用語への変容を分析
+  - **クラスタリング分析** - 類似の考えを持つグループに分類
+  - **AIインサイト抽出** - クラス全体の傾向や指導のポイントを提案
+- **データエクスポート** - CSV/JSON形式での一括ダウンロード
 
 ---
 
 ## 📚 対応学習単元（小学4年生 熱と温度）
 
-| 単元 | 主な学習内容 |
-|------|-----------|
-| 🔥 **金属のあたたまり方** | 金属の熱伝導と温まり方 |
-| 💧 **水のあたたまり方** | 液体の対流と温まり方 |
-| 💨 **空気の温度と体積** | 気体の性質と温度変化 |
-| 🌡️ **水を冷やし続けた時の温度と様子** | 冷却と温度の関係 |
+| 単元 | 主な学習内容 | 対応ファイル |
+|------|-----------|------------|
+| 🔥 **金属のあたたまり方** | 金属の熱伝導と温まり方 | `tasks/金属のあたたまり方.txt`<br>`prompts/金属のあたたまり方_prediction.md` |
+| 💧 **水のあたたまり方** | 液体の対流と温まり方 | `tasks/水のあたたまり方.txt`<br>`prompts/水のあたたまり方_prediction.md` |
+| 💨 **空気の温度と体積** | 気体の性質と温度変化 | `tasks/空気の温度と体積.txt`<br>`prompts/空気の温度と体積_prediction.md` |
+| 🧊 **水を冷やし続けた時の温度と様子** | 冷却と温度の関係、状態変化 | `tasks/水を冷やし続けた時の温度と様子.txt`<br>`prompts/水を冷やし続けた時の温度と様子_prediction.md` |
+| 🌡️ **金属の温度と体積** | 金属の熱膨張と収縮 | `tasks/金属の温度と体積.txt`<br>`prompts/金属の温度と体積_prediction.md` |
 
 ---
 
@@ -181,13 +198,16 @@ ScienceBuddy は、小学校理科の学習過程において、子ども達が*
 
 | カテゴリ | 技術スタック |
 |--------|-----------|
-| **バックエンド** | Flask (Python 3.12) |
+| **バックエンド** | Flask (Python 3.11+) |
 | **AI** | OpenAI API (gpt-4o-mini) |
 | **フロントエンド** | HTML5, CSS3, JavaScript, Bootstrap 5 |
-| **ローカルストレージ** | JSON形式ログ（`logs/`、`session_storage.json`） |
+| **ローカルストレージ** | JSON形式ログ（`logs/`、`session_storage.json`、`summary_storage.json`） |
 | **本番環境** | Google Cloud Run, Cloud Storage, Cloud Build |
+| **非同期処理** | Redis + RQ（オプション） |
+| **データ分析** | scikit-learn, numpy（理科用語含有率分析） |
 | **セッション管理** | Flask Session（ローカルでも永続化） |
 | **プロンプト管理** | Markdown形式（`prompts/`ディレクトリ） |
+| **音声認識** | Web Speech API（クライアントサイド） |
 
 ---
 
@@ -197,8 +217,8 @@ ScienceBuddy は、小学校理科の学習過程において、子ども達が*
 
 #### 1. リポジトリのクローン
 ```bash
-git clone https://github.com/nov11masaki/ScienceBuddy.git
-cd "ScienceBuddy(壊していい)"
+git clone https://github.com/nov11masaki/scienceapp2.git
+cd scienceapp2
 ```
 
 #### 2. 仮想環境の作成（推奨）
@@ -354,43 +374,63 @@ python tools/migrate_to_gcs.py
 
 ```
 ScienceBuddy/
-├── app.py                           # Flaskアプリケーション本体
+├── app.py                           # Flaskアプリケーション本体（3488行）
 ├── requirements.txt                 # Python依存パッケージ
+├── Dockerfile                       # Cloud Run用コンテナ設定
 ├── .env                            # 環境変数（OpenAI APIキー等）
+├── .gitignore                      # Git除外設定
+├── README.md                       # プロジェクトドキュメント（本ファイル）
+├── ANALYSIS_FEATURES.md            # 分析機能の詳細ドキュメント
 ├── learning_progress.json          # 学習進捗管理ファイル
 ├── session_storage.json            # セッションデータ（ローカル）
+├── summary_storage.json            # 要約データ（ローカル）
 ├── logs/                           # 学習ログ（日付別自動生成）
-│   └── learning_log_YYYYMMDD.json
+│   ├── learning_log_20251203.json
+│   ├── learning_log_20251204.json
+│   └── learning_log_20260120.json
 ├── prompts/                        # 単元別AIプロンプト
-│   ├── 金属のあたたまり方.md
-│   ├── 水のあたたまり方.md
-│   ├── 空気の温度と体積.md
-│   ├── 水を冷やし続けた時の温度と様子.md
-│   └── initial_messages.json       # 初期メッセージ設定
+│   ├── initial_messages.json       # 初期メッセージ設定
+│   ├── 金属のあたたまり方_prediction.md
+│   ├── 金属のあたたまり方_reflection.md
+│   ├── 水のあたたまり方_prediction.md
+│   ├── 水のあたたまり方_reflection.md
+│   ├── 空気の温度と体積_prediction.md
+│   ├── 空気の温度と体積_reflection.md
+│   ├── 水を冷やし続けた時の温度と様子_prediction.md
+│   ├── 水を冷やし続けた時の温度と様子_reflection.md
+│   ├── 金属の温度と体積_prediction.md
+│   └── 金属の温度と体積_reflection.md
 ├── tasks/                          # 単元別課題文
 │   ├── 金属のあたたまり方.txt
+│   ├── 金属の温度と体積.txt
 │   ├── 水のあたたまり方.txt
 │   ├── 空気の温度と体積.txt
 │   └── 水を冷やし続けた時の温度と様子.txt
 ├── templates/                      # HTMLテンプレート
-│   ├── base.html
-│   ├── index.html
-│   ├── select_class.html
-│   ├── select_number.html
-│   ├── select_unit.html
+│   ├── base.html                   # ベーステンプレート
+│   ├── index.html                  # トップページ
+│   ├── select_class.html           # クラス選択
+│   ├── select_number.html          # 出席番号選択
+│   ├── select_unit.html            # 単元選択
 │   ├── prediction.html             # 予想段階
-│   ├── experiment.html
 │   ├── reflection.html             # 考察段階
-│   ├── history.html                # 学習履歴表示（新規）
+│   ├── history.html                # 学習履歴表示
 │   └── teacher/                    # 教員用ページ
-│       ├── login.html
-│       ├── dashboard.html
-│       ├── logs.html
+│       ├── login.html              # 教員ログイン
+│       ├── dashboard.html          # 教員ダッシュボード
+│       ├── logs.html               # 学習ログ一覧
 │       ├── analysis_dashboard.html # 分析ダッシュボード
-│       └── student_detail.html
+│       └── student_detail.html     # 児童詳細分析
 ├── static/
-│   └── css/style.css
-└── README.md
+│   └── css/
+│       └── style.css               # 統合スタイルシート
+├── storage/                        # ストレージモジュール
+│   ├── __init__.py
+│   └── firestore_store.py          # Firestore連携（オプション）
+└── tools/                          # 分析・ワーカーツール
+    ├── analysis.py                 # 理科用語分析エンジン
+    ├── worker.py                   # RQワーカー（非同期処理）
+    └── __pycache__/
 ```
 
 ---
@@ -454,21 +494,22 @@ ScienceBuddy/
 
 ---
 
-## 🆕 最新アップデート（2026年1月14日）
+## 🆕 最新アップデート（2026年1月26日）
 
-### 学習履歴ページの実装
-- ✅ **生徒用履歴表示** - 過去の予想・考察を単元ごとに時系列表示
-- ✅ **会話データの統合** - サマリーと会話をセットで保存・表示
-- ✅ **学習ログからの補完** - 古いデータでも学習ログから会話を復元
-- ✅ **日本時間対応** - すべてのタイムスタンプを JST（日本時間）で統一
-- ✅ **モーダル詳細表示** - 予想・考察をクリックすると、その時の会話を時系列表示
+### 理科用語含有率分析機能
+- ✅ **定量的語彙分析** - テキスト中の理科用語の割合を自動計算
+- ✅ **語彙変容追跡** - 生活語彙から科学的用語への変化を検出
+  - 「あつい」→「温度が高い」
+  - 「ふとった」→「体積が増えた」
+  - 「膨らむ」→「膨張する」
+- ✅ **段階別分析** - 予想段階と考察段階での理科用語使用率を比較
+- ✅ **単元別辞書** - 各単元に特化した理科用語データベース
+- ✅ **教員向けインサイト** - AIが分析結果から指導のポイントを提案
 
-### 前回のアップデート（2025年12月1日）
-- ✅ **入力検証の大幅緩和** - 短い発言（「大きくなる」「温めた」など）も受け入れ
-- ✅ **最終まとめ（考察）表示の修正** - 教員用ページで考察が正しく表示されるように修正
-- ✅ **FORCE_SYNC_SUMMARY サポート** - 環境変数で同期処理モードを選択可能に
-- ✅ **デバッグログ強化** - PID、環境変数の状態を出力して問題診断が容易に
-- ✅ **開発ファイルの整理** - 不要な一時ファイルを削除、.gitignore を更新
+### 前回のアップデート（2026年1月14日）
+- ✅ **学習履歴ページ実装** - 過去の予想・考察を時系列表示
+- ✅ **会話データの統合保存** - サマリーと会話をセットで管理
+- ✅ **日本時間（JST）対応** - すべてのタイムスタンプを日本時間で統一
 
 ---
 
@@ -478,8 +519,8 @@ ScienceBuddy/
 
 ```bash
 # リポジトリのクローン
-git clone https://github.com/nov11masaki/ScienceBuddy.git
-cd ScienceBuddy
+git clone https://github.com/nov11masaki/scienceapp2.git
+cd scienceapp2
 
 # 仮想環境の作成
 python -m venv .venv
@@ -499,6 +540,17 @@ python app.py
 ```
 
 その後、ブラウザで http://localhost:5014 にアクセスしてください。
+
+### 教員ログイン情報（開発環境）
+
+| ID | パスワード | 権限 |
+|----|----------|-----|
+| teacher | science | 全クラス管理 |
+| 4100 | science | 1組のみ |
+| 4200 | science | 2組のみ |
+| 4300 | science | 3組のみ |
+| 4400 | science | 4組のみ |
+| 5000 | science | 研究室のみ |
 
 ### 本番環境（Cloud Run）でのセットアップ
 
@@ -557,6 +609,25 @@ gsutil cp -r gs://science-buddy-logs/logs/* ./logs_backup/
 
 ## 🔗 参考資料
 
+### 公式ドキュメント
 - [Flask ドキュメント](https://flask.palletsprojects.com/)
 - [OpenAI API リファレンス](https://platform.openai.com/docs/api-reference)
 - [Bootstrap 5 ドキュメント](https://getbootstrap.com/docs/5.0/)
+- [Google Cloud Run ドキュメント](https://cloud.google.com/run/docs)
+- [scikit-learn ドキュメント](https://scikit-learn.org/stable/)
+
+### プロジェクト関連
+- **リポジトリ**: [nov11masaki/scienceapp2](https://github.com/nov11masaki/scienceapp2)
+- **分析機能詳細**: [ANALYSIS_FEATURES.md](ANALYSIS_FEATURES.md)
+
+---
+
+## 📝 ライセンス
+
+このプロジェクトは教育目的で開発されています。
+
+## 👥 開発者
+
+- **プロジェクト**: 小学校理科学習支援システム ScienceBuddy
+- **対象学年**: 小学4年生（熱と温度単元）
+- **開発年**: 2025年〜2026年
